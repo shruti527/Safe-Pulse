@@ -3,6 +3,13 @@ const TrackingSession = require('../models/TrackingSession');
 const User = require('../models/User');
 const SOSAlert = require('../models/SOSAlert');
 
+// Helper to log verbose debug messages only when VERBOSE_LOGS is enabled
+const debugLog = (message, ...args) => {
+  if (process.env.VERBOSE_LOGS === 'true') {
+    console.log(message, ...args);
+  }
+};
+
 // Initialize the global online users map if not already done
 if (!global.onlineUsers) {
   global.onlineUsers = new Map(); // userId string -> Set of socketId strings
@@ -25,6 +32,13 @@ module.exports = function (io) {
       });
 
       for (const checkIn of missedCheckIns) {
+        // Validate userId is a valid ObjectId
+        if (!checkIn.userId || !isValidObjectId(checkIn.userId)) {
+          console.warn(`[BACKGROUND SERVICE] Invalid userId "${checkIn.userId}" found in CheckIn "${checkIn._id}". Deleting invalid check-in to prevent infinite errors.`);
+          await CheckIn.deleteOne({ _id: checkIn._id });
+          continue;
+        }
+
         checkIn.status = 'missed';
         await checkIn.save();
 
@@ -94,6 +108,13 @@ module.exports = function (io) {
       // 2. Check for SOS Alert Escalations
       const activeAlerts = await SOSAlert.find({ status: 'triggered' });
       for (const alert of activeAlerts) {
+        // Validate alert.userId is a valid ObjectId
+        if (!alert.userId || !isValidObjectId(alert.userId)) {
+          console.warn(`[BACKGROUND SERVICE] Invalid userId "${alert.userId}" found in SOSAlert "${alert._id}". Deleting invalid SOSAlert to prevent infinite errors.`);
+          await SOSAlert.deleteOne({ _id: alert._id });
+          continue;
+        }
+
         const timeDiffMins = (Date.now() - new Date(alert.createdAt).getTime()) / (60 * 1000);
         
         let newLevel = 1;
@@ -149,7 +170,7 @@ module.exports = function (io) {
   }, 15000);
 
   io.on('connection', (socket) => {
-    console.log(`[SOCKET] Connected: ${socket.id}`);
+    debugLog(`[SOCKET] Connected: ${socket.id}`);
 
     // Register user and join their private room
     socket.on('join_user_room', async (userId) => {
@@ -159,7 +180,7 @@ module.exports = function (io) {
       }
       socket.userId = userId;
       socket.join(`user_${userId}`);
-      console.log(`[SOCKET] User ${userId} joined room user_${userId} on socket ${socket.id}`);
+      debugLog(`[SOCKET] User ${userId} joined room user_${userId} on socket ${socket.id}`);
 
       // Track online status
       if (!global.onlineUsers.has(userId)) {
@@ -229,7 +250,7 @@ module.exports = function (io) {
         // Fetch user to check ghostMode
         const user = await User.findById(userId);
         if (user && user.ghostMode) {
-          console.log(`[SOCKET] Suppressed locationUpdate broadcast for User ${userId} (Ghost Mode Active)`);
+          debugLog(`[SOCKET] Suppressed locationUpdate broadcast for User ${userId} (Ghost Mode Active)`);
           return;
         }
 
@@ -492,18 +513,18 @@ module.exports = function (io) {
     socket.on('track_contact', (contactId) => {
       if (!contactId) return;
       socket.join(`user_${contactId}`);
-      console.log(`[SOCKET] Socket ${socket.id} started tracking contact ${contactId}`);
+      debugLog(`[SOCKET] Socket ${socket.id} started tracking contact ${contactId}`);
     });
 
     // 8. untrack_contact
     socket.on('untrack_contact', (contactId) => {
       if (!contactId) return;
       socket.leave(`user_${contactId}`);
-      console.log(`[SOCKET] Socket ${socket.id} stopped tracking contact ${contactId}`);
+      debugLog(`[SOCKET] Socket ${socket.id} stopped tracking contact ${contactId}`);
     });
 
     socket.on('disconnect', () => {
-      console.log(`[SOCKET] Disconnected: ${socket.id}`);
+      debugLog(`[SOCKET] Disconnected: ${socket.id}`);
       if (socket.userId) {
         const userId = socket.userId;
         if (global.onlineUsers.has(userId)) {
