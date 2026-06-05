@@ -1,0 +1,817 @@
+SafePulse — AI-Ready Product Requirements Document (PRD)
+Privacy-First Family Safety & Location Sharing App
+1. Executive Summary
+SafePulse
+ is a React-based mobile-first web application (PWA) that enables secure real-time location sharing, geofence-based arrival/departure alerts, SOS emergency signaling, and temporary tracking sessions for families, students, women, and elderly users. The app uses 
+Google Stitch
+ for AI-generated UI templates and 
+MongoDB Atlas + Stitch
+ for serverless backend operations.
+Core Value Proposition:
+ Privacy-first safety tracking with temporary sharing, intelligent alerts, and one-tap emergency response — designed specifically for the Indian market and family safety workflows.
+2. Tech Stack Specification
+Table
+Layer
+Technology
+Purpose
+Frontend Framework
+React 18+ (Vite)
+UI components, state management
+UI Template Source
+Google Stitch
+Initial screen designs, exported to React/Tailwind
+Styling
+Tailwind CSS + shadcn/ui
+Consistent design system
+Backend
+MongoDB Atlas + Stitch SDK
+Serverless database, auth, functions
+Real-time
+MongoDB Change Streams / WebSocket
+Live location updates
+Maps
+Google Maps Platform API
+Map rendering, geocoding, geofencing
+Auth
+Firebase Auth + MongoDB Stitch Auth
+OTP-based phone authentication
+Notifications
+Firebase Cloud Messaging
+Push notifications for alerts
+PWA
+Vite PWA Plugin
+Offline support, installable app
+State Management
+Zustand
+Global state for location, contacts
+Geolocation
+Navigator Geolocation API + Background Geolocation
+GPS tracking
+3. Google Stitch Template Integration
+3.1 Stitch Prompt for AI Agent
+When using Google Stitch to generate the initial UI template, use this exact prompt:
+plain
+Copy
+"Create a mobile-first safety tracking app called SafePulse with a dark theme (slate-900 background, emerald-500 accents). Include: (1) A home screen with a live map taking 60% of the screen, a bottom sheet showing trusted contacts with online status indicators, and a prominent floating SOS button in red-500 with pulse animation. (2) A contacts screen with circular avatar lists, add-contact button, and permission toggles. (3) A safe zones screen showing saved locations as cards with radius sliders. (4) An SOS activation screen with countdown timer, loud alarm toggle, and emergency contact grid. (5) A temporary sharing screen with duration picker (30min, 2hr, custom) and shareable link generator. Use glassmorphism effects, rounded-2xl corners, and Inter font. Export as React components with Tailwind classes."
+3.2 Export Path
+Generate screens in Stitch using the prompt above
+Export to 
+React + Tailwind
+ format
+Copy components into /src/components/stitch-generated/
+Refactor into reusable components per Section 8
+4. Database Schema (MongoDB Atlas)
+4.1 Collections
+JavaScript
+Copy
+// users collection
+{
+  _id: ObjectId,
+  phone: String,              
+// +91 format, unique
+  name: String,
+  email: String,
+  avatar: String,             
+// URL or base64
+  trustedContacts: [{
+    userId: ObjectId,
+    name: String,
+    phone: String,
+    relationship: String,     
+// "family", "friend", "emergency"
+    canTrack: Boolean,
+    canReceiveSOS: Boolean,
+    addedAt: Date
+  }],
+  settings: {
+    sosAlarmEnabled: Boolean,
+    shakeToSOS: Boolean,      
+// Future feature
+    defaultShareDuration: Number, 
+// minutes
+    batteryOptimization: Boolean
+  },
+  createdAt: Date,
+  updatedAt: Date
+}
+// locations collection (Time-Series or TTL Index)
+{
+  _id: ObjectId,
+  userId: ObjectId,
+  latitude: Number,
+  longitude: Number,
+  accuracy: Number,           
+// GPS accuracy in meters
+  speed: Number,              
+// km/h if available
+  timestamp: Date,
+  batteryLevel: Number,       
+// 0-100
+  expiresAt: Date             
+// TTL index for auto-cleanup (24h)
+}
+// safeZones collection
+{
+  _id: ObjectId,
+  userId: ObjectId,
+  name: String,               
+// "Home", "College", "Office"
+  latitude: Number,
+  longitude: Number,
+  radius: Number,             
+// meters (default: 100)
+  address: String,
+  type: String,               
+// "home", "work", "education", "custom"
+  notifyOnEnter: Boolean,
+  notifyOnExit: Boolean,
+  trustedContacts: [ObjectId], 
+// who gets notified
+  createdAt: Date
+}
+// sharingSessions collection
+{
+  _id: ObjectId,
+  ownerId: ObjectId,
+  token: String,              
+// Unique shareable token
+  duration: Number,           
+// minutes
+  expiresAt: Date,
+  isActive: Boolean,
+  sharedWith: [{
+    phone: String,
+    name: String,
+    joinedAt: Date
+  }],
+  createdAt: Date
+}
+// alerts collection
+{
+  _id: ObjectId,
+  type: String,               
+// "sos", "arrival", "departure", "share_start", "share_expire"
+  fromUserId: ObjectId,
+  toUserId: ObjectId,
+  location: {
+    latitude: Number,
+    longitude: Number,
+    address: String
+  },
+  safeZoneId: ObjectId,       
+// if zone-related
+  message: String,
+  status: String,             
+// "sent", "delivered", "read"
+  createdAt: Date
+}
+4.2 Stitch Rules Configuration
+Configure MongoDB Stitch rules for security:
+Users collection:
+ Users can only read/write their own document (owner_id === stitchUser.id)
+Locations collection:
+ Write own location, read trusted contacts' locations
+SafeZones collection:
+ CRUD own zones, read-only for trusted contacts
+SharingSessions:
+ Token-based read access for non-authenticated viewers
+5. API Requirements (Stitch Functions + HTTP Endpoints)
+Table
+Endpoint
+Method
+Auth
+Description
+/auth/otp/send
+POST
+None
+Send OTP to phone via Firebase
+/auth/otp/verify
+POST
+None
+Verify OTP, return JWT + Stitch token
+/auth/profile
+GET
+JWT
+Get current user profile
+/location/update
+POST
+JWT
+Update current GPS position
+/location/live/:userId
+GET
+JWT
+Get live location (WebSocket preferred)
+/location/history
+GET
+JWT
+Get 24h location history
+/contacts
+GET
+JWT
+List trusted contacts
+/contacts/add
+POST
+JWT
+Add by phone number
+/contacts/remove
+POST
+JWT
+Remove contact
+/safe-zones
+GET
+JWT
+List user's safe zones
+/safe-zones
+POST
+JWT
+Create new safe zone
+/safe-zones/:id
+DELETE
+JWT
+Delete safe zone
+/sos/trigger
+POST
+JWT
+Trigger SOS alert
+/sos/cancel
+POST
+JWT
+Cancel active SOS
+/share/create
+POST
+JWT
+Create temporary sharing session
+/share/:token
+GET
+None
+View shared location (public token)
+/share/:token/end
+POST
+JWT
+End sharing session early
+/alerts
+GET
+JWT
+Get notification history
+/alerts/read
+POST
+JWT
+Mark alerts as read
+6. Core Features — Detailed Specifications
+6.1 Feature: Live Location Tracking
+User Flow:
+User opens app → sees map centered on their location
+Toggles "Share Live Location" → selects trusted contacts or "All"
+Contact receives push notification: "Priya started sharing live location"
+Contact opens app → sees Priya's avatar moving on map in real-time
+User can stop sharing anytime → contacts get "Location sharing ended" notification
+Functional Requirements:
+GPS updates every 5 seconds when app foreground, every 30 seconds background
+Battery optimization mode: updates every 2 minutes when battery < 20%
+Map shows user avatar with accuracy circle
+Contact list shows "Live" badge in green when actively sharing
+Background tracking using Service Worker + Geolocation API
+React Implementation:
+jsx
+Copy
+// Key components to build
+<MapContainer />          
+// Google Maps wrapper
+<<LiveLocationMarker />    
+// Animated user avatar
+<<ContactListSheet />      
+// Bottom sheet with online status
+<<ShareLocationToggle />   
+// Toggle with contact selector
+Stitch Integration:
+Use MongoDB Change Streams to listen for location updates from trusted contacts
+Store location in locations collection with TTL index (auto-delete after 24h)
+6.2 Feature: Arrival/Departure Alerts (Safe Zones)
+User Flow:
+User taps "Add Safe Zone" → drops pin on map or searches address
+Sets radius (50m - 500m), label ("College"), and notification contacts
+App monitors geofence in background
+When user enters zone: Push notification sent to selected contacts
+When user leaves zone: Push notification sent
+Functional Requirements:
+Geofence accuracy: 50m minimum radius for urban areas
+Debounce: Must stay in zone for 2+ minutes to trigger "Arrived"
+Smart detection: Don't alert if user was already in zone when app opened
+Multiple zones: Up to 5 zones on free plan, unlimited on premium
+React Implementation:
+jsx
+Copy
+<<SafeZoneCard />          
+// Zone with map preview, radius slider
+<<GeofenceMonitor />       
+// Background geofence logic
+<<ZoneNotificationLog />   
+// History of enter/exit events
+Stitch Integration:
+Use MongoDB Stitch Functions to check geofence triggers server-side
+Store zone entries in alerts collection
+6.3 Feature: SOS Emergency Alert
+User Flow:
+User presses and holds SOS button for 2 seconds (prevents accidental)
+Screen shows countdown: "SOS will trigger in 3... 2... 1..."
+Option to cancel during countdown
+SOS triggers: Sends to all emergency contacts + optional loud alarm
+SOS screen shows: "Help is on the way" with live location updating
+User can cancel SOS if false alarm
+Functional Requirements:
+One-tap SOS with 3-second cancel window
+Sends: Live location link, timestamp, battery level, message
+Optional 100dB alarm sound (toggle in settings)
+Auto-dials first emergency contact after 30 seconds (future)
+SOS mode stays active until manually cancelled
+React Implementation:
+jsx
+Copy
+<SOSButton />             
+// Large red button with hold-to-activate
+<SOSCountdown />          
+// 3-second countdown overlay
+<SOSActiveScreen />       
+// Full-screen SOS status with pulsing red
+<<SOSSettings />           
+// Alarm toggle, contact priority
+6.4 Feature: Temporary Sharing Sessions
+User Flow:
+User selects "Share Temporarily" → picks duration (30min, 2hr, 8hr, custom)
+App generates unique link: safepulse.app/share/abc123
+User shares via WhatsApp/SMS/any app
+Recipient opens link → sees live map without needing app install
+Timer counts down in sharer's app
+Auto-expires: Link stops working, data deleted
+Functional Requirements:
+Token-based access: No login required for viewers
+Expiration options: 15min, 30min, 1hr, 2hr, 8hr, 24hr, "Until I arrive"
+Sharer can end session early
+Viewers see: Map, user name, time remaining, "Session ended" when done
+Data auto-deleted from database after expiration
+React Implementation:
+jsx
+Copy
+<TempShareModal />        
+// Duration picker and link generator
+<<ShareLinkViewer />       
+// Public page for non-logged-in users
+<TimerCountdown />        
+// Live countdown in sharer's UI
+6.5 Feature: Safe Zone Management
+User Flow:
+User navigates to "Safe Zones" tab
+Sees list of saved zones with mini map previews
+Can add, edit, or delete zones
+Toggle notifications per zone (enter/exit/both)
+Quick-add: "Save current location" button
+Functional Requirements:
+Max 5 zones (free), unlimited (premium)
+Zone types: Home, Work, School, Gym, Custom
+Radius: 50m - 1000m adjustable
+Smart suggestions: "You visit this place often. Save as zone?"
+7. Screen-by-Screen Specifications
+7.1 Authentication Screens
+Table
+Screen
+Elements
+Stitch Prompt Addendum
+Splash
+App logo, tagline "Stay Connected. Stay Safe.", get started button
+"Minimal splash screen with centered logo, gradient background from slate-900 to slate-800, emerald accent glow behind logo"
+Phone Input
+Country picker (+91 default), phone input, next button
+"Clean input screen with large phone number field, country code dropdown, subtle keyboard animation"
+OTP Verify
+6-digit input, resend timer (30s), verify button
+"OTP screen with 6 separate input boxes, auto-focus next box, countdown timer in muted text"
+Profile Setup
+Name input, photo upload (optional), emergency contact add
+"Profile setup with circular avatar placeholder, camera icon overlay, form with floating labels"
+7.2 Main App Screens
+Table
+Screen
+Elements
+Stitch Prompt Addendum
+Home/Map
+Full-screen map, bottom sheet (contacts), FAB SOS button, top bar (profile, notifications)
+"Primary screen: Google Map taking full screen, bottom sheet draggable to 30%/70%, emerald online indicators, large red SOS FAB with pulse ring animation"
+Contacts
+Search bar, contact list (avatar, name, status, tracking toggle), add button
+"Contact list with sticky headers 'Tracking Me' / 'I Track', swipe actions for quick settings"
+Safe Zones
+Zone cards (map preview, name, radius), add button, empty state
+"Card-based layout with embedded mini maps, radius shown as circular progress, floating add button"
+SOS Screen
+Big red button, countdown, cancel button, settings gear
+"Full-screen emergency UI, dramatic red gradient, large tactile button with haptic feedback visual"
+Temporary Share
+Duration picker (chips + custom), generated link, share button, active sessions list
+"Modal bottom sheet with horizontal duration chips, link card with copy button, QR code option"
+Notifications
+Alert list (SOS, arrival, system), filter tabs, read/unread states
+"Notification center with categorized tabs, unread badges, swipe to dismiss"
+Profile/Settings
+Avatar, name, phone, settings list (privacy, notifications, battery, help), logout
+"Settings screen with grouped sections, toggle switches, danger zone for logout in red"
+8. Component Architecture (React)
+plain
+Copy
+/src
+├
+──
+ /components
+│   
+├
+──
+ /ui                    # shadcn/ui base components
+│   │   
+├
+──
+ Button.tsx
+│   │   
+├
+──
+ Card.tsx
+│   │   
+├
+──
+ Input.tsx
+│   │   
+├
+──
+ Sheet.tsx          # Bottom sheet
+│   │   
+├
+──
+ Avatar.tsx
+│   │   └── Switch.tsx
+│   │
+│   
+├
+──
+ /stitch-generated      # From Google Stitch export
+│   │   
+├
+──
+ SplashScreen.tsx
+│   │   
+├
+──
+ MapScreen.tsx
+│   │   
+├
+──
+ ContactList.tsx
+│   │   
+├
+──
+ SafeZoneCard.tsx
+│   │   └── SOSScreen.tsx
+│   │
+│   
+├
+──
+ /map
+│   │   
+├
+──
+ GoogleMap.tsx      # Map wrapper
+│   │   
+├
+──
+ LiveMarker.tsx     # Animated user marker
+│   │   
+├
+──
+ GeofenceCircle.tsx # Radius visualization
+│   │   └── MapBottomSheet.tsx # Draggable bottom panel
+│   │
+│   
+├
+──
+ /safety
+│   │   
+├
+──
+ SOSButton.tsx      # Hold-to-trigger button
+│   │   
+├
+──
+ SOSCountdown.tsx   # 3-second countdown
+│   │   
+├
+──
+ SOSActive.tsx      # Active SOS mode UI
+│   │   └── SafeZoneForm.tsx   # Add/edit zone form
+│   │
+│   
+├
+──
+ /sharing
+│   │   
+├
+──
+ TempShareModal.tsx # Duration picker
+│   │   
+├
+──
+ ShareLinkCard.tsx  # Generated link display
+│   │   
+├
+──
+ ActiveSession.tsx  # Ongoing session card
+│   │   └── PublicViewer.tsx   # Non-auth link viewer
+│   │
+│   └── /layout
+│       
+├
+──
+ AppShell.tsx       # Mobile frame with safe areas
+│       
+├
+──
+ TabBar.tsx         # Bottom navigation
+│       └── TopBar.tsx         # Header with back/close
+│
+├
+──
+ /hooks
+│   
+├
+──
+ useLocation.ts         # Geolocation + permissions
+│   
+├
+──
+ useGeofence.ts         # Zone enter/exit detection
+│   
+├
+──
+ useStitch.ts           # MongoDB Stitch client
+│   
+├
+──
+ useAuth.ts             # Firebase + Stitch auth
+│   
+├
+──
+ usePushNotifications.ts # FCM integration
+│   └── useBackgroundSync.ts   # Service worker sync
+│
+├
+──
+ /stores
+│   
+├
+──
+ useUserStore.ts        # Zustand: user profile
+│   
+├
+──
+ useLocationStore.ts    # Zustand: live locations
+│   
+├
+──
+ useContactsStore.ts    # Zustand: trusted contacts
+│   └── useAlertsStore.ts      # Zustand: notifications
+│
+├
+──
+ /lib
+│   
+├
+──
+ stitch-client.ts       # Stitch SDK initialization
+│   
+├
+──
+ firebase.ts            # Firebase config
+│   
+├
+──
+ geofence.ts            # Geofence math utilities
+│   └── notifications.ts       # FCM message handlers
+│
+├
+──
+ /pages
+│   
+├
+──
+ Splash.tsx
+│   
+├
+──
+ Auth.tsx
+│   
+├
+──
+ Home.tsx
+│   
+├
+──
+ Contacts.tsx
+│   
+├
+──
+ SafeZones.tsx
+│   
+├
+──
+ SOS.tsx
+│   
+├
+──
+ Share.tsx
+│   
+├
+──
+ Notifications.tsx
+│   
+├
+──
+ Settings.tsx
+│   └── PublicShare.tsx        # Public token viewer
+│
+└── /types
+    
+├
+──
+ user.ts
+    
+├
+──
+ location.ts
+    
+├
+──
+ safeZone.ts
+    └── alert.ts
+9. Non-Functional Requirements
+Table
+Requirement
+Specification
+Performance
+Map render < 2s; Location update latency < 3s; App cold start < 3s
+Battery
+Background GPS: 30s intervals; Low battery mode: 2min intervals; Geofence: native API when possible
+Security
+End-to-end location encryption; JWT token expiry: 24h; OTP expiry: 5min; No location data persistence > 24h (except safe zones)
+Privacy
+Explicit opt-in for every share; Granular contact permissions; Auto-delete temporary data; No data selling
+Scalability
+MongoDB Atlas M10 cluster; Stitch serverless functions; Support 10k+ concurrent users
+Availability
+99.5% uptime target; Offline mode: queue actions, sync when online
+Accessibility
+WCAG 2.1 AA; Screen reader support; High contrast mode; Minimum touch target 44x44dp
+10. Privacy & Security Rules (Critical)
+Consent Required:
+ No location tracking without explicit user consent per contact
+Revocable:
+ User can stop sharing and remove contacts anytime
+Encrypted:
+ Location data encrypted in transit (TLS 1.3) and at rest
+Temporary Only:
+ Default sharing is temporary; permanent tracking requires explicit setup
+No Commercial Use:
+ Location data never sold, shared with advertisers, or used for ads
+Audit Trail:
+ Users can view who accessed their location and when
+SOS Override:
+ SOS alerts bypass normal privacy settings for emergency contacts
+11. Stitch-to-React Workflow for AI Agent
+When an AI agent builds this app using this PRD, follow this workflow:
+Step 1: Generate UI with Google Stitch
+Go to stitch.withgoogle.com
+Use the prompt from Section 3.1
+Export each screen as React + Tailwind
+Place in /src/components/stitch-generated/
+Step 2: Setup React Project
+bash
+Copy
+npm create vite@latest safepulse -- --template react-ts
+cd safepulse
+npm install tailwindcss postcss autoprefixer
+npx tailwindcss init -p
+npm install zustand @googlemaps/react-wrapper firebase mongodb-stitch-browser-sdk
+npm install -D @types/google.maps
+Step 3: Configure Tailwind (tailwind.config.js)
+JavaScript
+Copy
+module.exports = {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        safepulse: {
+          dark: '#0f172a',      
+// slate-900
+          card: '#1e293b',      
+// slate-800
+          accent: '#10b981',    
+// emerald-500
+          danger: '#ef4444',    
+// red-500
+          warning: '#f59e0b',   
+// amber-500
+        }
+      },
+      animation: {
+        'pulse-sos': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'slide-up': 'slideUp 0.3s ease-out',
+      }
+    }
+  },
+  plugins: [],
+}
+Step 4: Implement Core Logic
+Replace Stitch-generated static data with Zustand stores
+Connect to MongoDB Stitch using /src/lib/stitch-client.ts
+Implement real-time subscriptions for location updates
+Add geofence detection using useGeofence hook
+Step 5: Add PWA Support
+Configure vite-plugin-pwa
+Add manifest.json with app icons
+Enable background sync for offline SOS queueing
+12. MVP Success Metrics
+Table
+Metric
+Target
+Measurement
+Daily Active Users
+500+
+Firebase Analytics
+7-Day Retention
+35%+
+Cohort analysis
+SOS Triggers/Week
+Track for trust validation
+Alert collection count
+Avg Session Duration
+4+ minutes
+Analytics
+Safe Zones Created
+2+ per user
+Database aggregation
+Share Links Generated
+5+ per user/week
+Database aggregation
+App Store Rating
+4.0+
+Play Store Console
+13. Future Roadmap (Post-MVP)
+Table
+Phase
+Features
+AI Safety v1
+Unsafe route detection, anomaly detection in movement patterns, predictive ETA
+Advanced SOS
+Shake-to-SOS, voice-triggered SOS ("Help me SafePulse"), fake call mode
+Family Circles
+Group tracking for trips, event-based sharing, family dashboard
+Hardware
+Wearable integration, Bluetooth beacon for elderly
+B2B
+School bus tracking, employee safety for logistics, elderly care facilities
+Monetization
+Freemium: ₹99/month for unlimited zones, 30-day history, AI alerts, priority support
+14. AI Agent Implementation Checklist
+For any AI coding agent (Cursor, Claude Code, GitHub Copilot) building SafePulse:
+[ ] 
+Project Setup:
+ Vite + React + TypeScript + Tailwind configured
+[ ] 
+Stitch Integration:
+ MongoDB Stitch client initialized with app ID
+[ ] 
+Auth Flow:
+ Phone OTP → Firebase Auth → Stitch login → Profile creation
+[ ] 
+Map Integration:
+ Google Maps API key, GoogleMap component, current location marker
+[ ] 
+Geolocation:
+ useLocation hook with foreground/background modes, permission handling
+[ ] 
+Live Tracking:
+ Real-time location write to MongoDB, Change Stream subscription for contacts
+[ ] 
+Safe Zones:
+ CRUD operations, geofence detection, push notification triggers
+[ ] 
+SOS System:
+ Hold-to-activate, countdown, cancel logic, emergency broadcast
+[ ] 
+Temporary Sharing:
+ Token generation, public viewer page, auto-expiration cleanup
+[ ] 
+UI Polish:
+ Bottom sheet animations, loading states, error boundaries, offline indicators
+[ ] 
+PWA:
+ Service worker, manifest, install prompt, background sync
+[ ] 
+Testing:
+ Unit tests for geofence math, integration tests for sharing flow
