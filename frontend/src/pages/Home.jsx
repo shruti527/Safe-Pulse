@@ -12,6 +12,7 @@ const Home = () => {
   const [trackingActive, setTrackingActive] = useState(true);
   const [geofences, setGeofences] = useState([]);
   const [contactsOnMap, setContactsOnMap] = useState([]);
+  const [focusedContact, setFocusedContact] = useState(null);
   const [acceptedContactIds, setAcceptedContactIds] = useState([]);
   const [checkInActive, setCheckInActive] = useState(false);
   const [checkInDeadline, setCheckInDeadline] = useState(null);
@@ -268,6 +269,11 @@ const Home = () => {
         );
 
         setContactsOnMap(mapItems.filter(Boolean));
+
+        if (trackId) {
+          const target = mapItems.find(item => item?.id === trackId);
+          setFocusedContact(target || null);
+        }
       } catch (err) {
         console.error('Error fetching contacts for map:', err);
       }
@@ -291,12 +297,13 @@ const Home = () => {
     <main className="flex-grow relative w-full pt-16 pb-20 overflow-hidden h-screen">
       {/* Real Interactive Leaflet Map */}
       <div className="absolute inset-0 z-0">
-        <MapComponent 
+        <MapComponent
           center={currentLocation ? [currentLocation.latitude, currentLocation.longitude] : null}
           contacts={contactsOnMap}
           geofences={geofences}
           trackingActive={trackingActive}
           recenterTrigger={recenterTrigger}
+          focusedContact={focusedContact}
         />
       </div>
 

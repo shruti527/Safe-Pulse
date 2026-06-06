@@ -22,6 +22,17 @@ const RecenterMap = ({ center, trackingActive, recenterTrigger }) => {
   return null;
 };
 
+// Fly to a specific contact when one is requested (e.g. via ?track=userId)
+const FlyToContact = ({ focusedContact }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (focusedContact?.position) {
+      map.flyTo(focusedContact.position, 15, { animate: true, duration: 1.0 });
+    }
+  }, [focusedContact, map]);
+  return null;
+};
+
 // Custom DIV Icon for current user (pulsing radar effect)
 const userIcon = L.divIcon({
   className: 'user-radar-marker',
@@ -57,7 +68,7 @@ const contactIcon = (name, isOnline = true) => L.divIcon({
   iconAnchor: [0, 0]
 });
 
-const MapComponent = ({ center, contacts = [], geofences = [], trackingActive = true, recenterTrigger }) => {
+const MapComponent = ({ center, contacts = [], geofences = [], trackingActive = true, recenterTrigger, focusedContact }) => {
   const defaultCenter = center || [37.7749, -122.4194]; // SF fallback
   const zoom = 15;
 
@@ -136,6 +147,9 @@ const MapComponent = ({ center, contacts = [], geofences = [], trackingActive = 
 
         {/* Auto Recenter Map */}
         <RecenterMap center={center} trackingActive={trackingActive} recenterTrigger={recenterTrigger} />
+
+        {/* Fly to focused contact when set */}
+        <FlyToContact focusedContact={focusedContact} />
       </MapContainer>
     </div>
   );

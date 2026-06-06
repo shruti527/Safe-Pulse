@@ -44,8 +44,8 @@ const ContactCard = ({ contact, onAccept, onReject, onCancel, onTrack }) => {
         {contact.status === 'pending_sent' && (
           <button onClick={() => onCancel(contact)} className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors text-sm">Cancel</button>
         )}
-        {/* Default navigation icons */}
-        {contact.trackingMe && (
+        {/* Track on Map — only available for fully accepted contacts */}
+        {contact.status === 'accepted' && (
           <button 
             onClick={() => onTrack(contact)}
             className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-secondary hover:bg-secondary/10 transition-colors"
