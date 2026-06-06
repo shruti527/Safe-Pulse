@@ -12,6 +12,7 @@ const Home = () => {
   const [trackingActive, setTrackingActive] = useState(true);
   const [geofences, setGeofences] = useState([]);
   const [contactsOnMap, setContactsOnMap] = useState([]);
+  const [acceptedContactIds, setAcceptedContactIds] = useState([]);
   const [checkInActive, setCheckInActive] = useState(false);
   const [checkInDeadline, setCheckInDeadline] = useState(null);
   const [checkInTimeLeft, setCheckInTimeLeft] = useState('');
@@ -95,56 +96,47 @@ const Home = () => {
       socket.emit('join_user_room', userId);
     }
     
-    if (trackId) {
-      socket.emit('track_contact', trackId);
-    }
-    
     socket.on('session_started', (data) => {
       setSessionId(data.sessionId);
     });
 
+    // Update position for ANY tracked contact on the map
     socket.on('locationUpdate', (data) => {
-      if (data.userId === trackId) {
-        setContactsOnMap((prev) => 
-          prev.map((c) => {
-            if (c.id === trackId) {
-              return {
-                ...c,
-                position: [data.latitude, data.longitude],
-                lastSeen: 'Online',
-              };
-            }
-            return c;
-          })
-        );
-      }
+      setContactsOnMap((prev) => 
+        prev.map((c) => {
+          if (c.id === data.userId) {
+            return {
+              ...c,
+              position: [data.latitude, data.longitude],
+              lastSeen: 'Online',
+            };
+          }
+          return c;
+        })
+      );
     });
 
+    // Update online/offline status for any contact on the map
     socket.on('user_status_change', (data) => {
-      if (data.userId === trackId) {
-        setContactsOnMap((prev) => 
-          prev.map((c) => {
-            if (c.id === trackId) {
-              return {
-                ...c,
-                lastSeen: data.status,
-              };
-            }
-            return c;
-          })
-        );
-      }
+      setContactsOnMap((prev) => 
+        prev.map((c) => {
+          if (c.id === data.userId) {
+            return {
+              ...c,
+              lastSeen: data.status,
+            };
+          }
+          return c;
+        })
+      );
     });
 
     return () => {
-      if (trackId && socket) {
-        socket.emit('untrack_contact', trackId);
-      }
       socket.off('session_started');
       socket.off('locationUpdate');
       socket.off('user_status_change');
     };
-  }, [userId, trackId]);
+  }, [userId]);
 
   // 1. Fetch geofences to display circles on map
   useEffect(() => {
@@ -238,49 +230,62 @@ const Home = () => {
     resolveAddress();
   }, [currentLocation]);
 
-  // 4. Fetch tracked contact and position them on the map
+  // 4. Fetch ALL accepted trusted contacts and place them on the map
   useEffect(() => {
-    const fetchTrackedContact = async () => {
-      if (!trackId) {
-        setContactsOnMap([]);
-        return;
-      }
+    const fetchContactsForMap = async () => {
       try {
-        // Fetch contacts to get the contact name
         const contactsRes = await axios.get('/api/auth/contacts');
-        const contactsList = contactsRes.data.data || [];
-        
-        const matchedContact = contactsList.find(c => c.userId === trackId || c.user?._id === trackId);
-        
-        if (matchedContact) {
-          const name = matchedContact.user?.name || matchedContact.name;
-          const isOnline = matchedContact.user?.status === 'Online' || matchedContact.status === 'Online';
-          
-          // Fetch location history (last location)
-          const historyRes = await axios.get(`/api/location/history/${trackId}?limit=1`);
-          const lastLoc = historyRes.data.data?.[0];
-          
-          if (lastLoc) {
-            setContactsOnMap([
-              {
-                id: trackId,
-                name: name,
+        const allContacts = contactsRes.data.data || [];
+        const accepted = allContacts.filter(c => c.status === 'accepted');
+
+        // Track their IDs for socket room joining
+        const ids = accepted
+          .map(c => c.user?._id || c.userId)
+          .filter(Boolean);
+        setAcceptedContactIds(ids);
+
+        // Fetch last known location for each accepted contact in parallel
+        const mapItems = await Promise.all(
+          accepted.map(async (contact) => {
+            const contactUserId = contact.user?._id || contact.userId;
+            if (!contactUserId) return null;
+            const name = contact.user?.name || contact.name || 'Contact';
+            const isOnline = contact.user?.status === 'Online';
+            try {
+              const historyRes = await axios.get(`/api/location/history/${contactUserId}?limit=1`);
+              const lastLoc = historyRes.data.data?.[0];
+              if (!lastLoc) return null;
+              return {
+                id: contactUserId,
+                name,
                 position: [lastLoc.latitude, lastLoc.longitude],
-                lastSeen: isOnline ? 'Online' : 'Offline'
-              }
-            ]);
-          } else {
-            console.log('No location history found for tracked user');
-            setContactsOnMap([]);
-          }
-        }
+                lastSeen: isOnline ? 'Online' : 'Offline',
+              };
+            } catch {
+              return null; // No location data — skip silently
+            }
+          })
+        );
+
+        setContactsOnMap(mapItems.filter(Boolean));
       } catch (err) {
-        console.error('Error fetching tracked contact data:', err);
+        console.error('Error fetching contacts for map:', err);
       }
     };
-    
-    fetchTrackedContact();
+
+    fetchContactsForMap();
   }, [trackId]);
+
+  // 5. Join socket rooms for all accepted contacts to receive live location updates
+  useEffect(() => {
+    if (!acceptedContactIds.length) return;
+    const socket = getSocket();
+    // Join each accepted contact's socket room to receive their location updates
+    acceptedContactIds.forEach(id => socket.emit('track_contact', id));
+    return () => {
+      acceptedContactIds.forEach(id => socket.emit('untrack_contact', id));
+    };
+  }, [acceptedContactIds]);
 
   return (
     <main className="flex-grow relative w-full pt-16 pb-20 overflow-hidden h-screen">
