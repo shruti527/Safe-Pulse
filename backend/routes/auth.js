@@ -176,7 +176,8 @@ router.post('/contacts/request', protect, async (req, res) => {
     } else {
       if (normalizedPhone.length >= 10) {
         const last10Digits = normalizedPhone.slice(-10);
-        query = { phone: { $regex: new RegExp(last10Digits + '$') } };
+        const regexPattern = last10Digits.split('').join('\\D*') + '$';
+        query = { phone: { $regex: new RegExp(regexPattern) } };
       } else {
         query = {
           $or: [
