@@ -191,11 +191,11 @@ router.post('/contacts/request', protect, async (req, res) => {
     const targetUser = await User.findOne(query);
 
     if (!targetUser) {
-      return res.status(404).json({ success: false, message: 'User not found with this email/phone' });
+      return res.status(200).json({ success: false, message: 'User not found with this email/phone' });
     }
 
     if (targetUser._id.toString() === req.user._id.toString()) {
-      return res.status(400).json({ success: false, message: 'You cannot add yourself as a contact' });
+      return res.status(200).json({ success: false, message: 'You cannot add yourself as a contact' });
     }
 
     // Check if relationship already exists
@@ -203,7 +203,7 @@ router.post('/contacts/request', protect, async (req, res) => {
     const alreadyContact = sender.contacts.find(c => c.user.toString() === targetUser._id.toString());
 
     if (alreadyContact) {
-      return res.status(400).json({ 
+      return res.status(200).json({ 
         success: false, 
         message: alreadyContact.status === 'accepted' 
           ? 'This user is already in your contacts' 

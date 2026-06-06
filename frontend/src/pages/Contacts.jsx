@@ -155,10 +155,16 @@ const Contacts = () => {
   const handleAddSubmit = async (value, options = {}) => {
     const { silent = false } = options;
     try {
-      await axios.post('/api/auth/contacts/request', { emailOrPhone: value });
-      if (!silent) {
-        setShowAddModal(false);
-        fetchContacts();
+      const res = await axios.post('/api/auth/contacts/request', { emailOrPhone: value });
+      if (res.data.success) {
+        if (!silent) {
+          setShowAddModal(false);
+          fetchContacts();
+        }
+      } else {
+        if (!silent) {
+          setAddError(res.data.message || 'Failed to send request');
+        }
       }
     } catch (err) {
       console.error(err);
