@@ -146,7 +146,8 @@ router.get('/contacts', protect, async (req, res) => {
           ...contactObj,
           status: isOnline ? 'Online' : 'Offline'
         },
-        status: c.status
+        status: c.status,
+        requestedBy: c.requestedBy ? c.requestedBy.toString() : null
       };
     }).filter(Boolean);
 
@@ -211,9 +212,9 @@ router.post('/contacts/request', protect, async (req, res) => {
       });
     }
 
-    // Add pending requests to both users
-    sender.contacts.push({ user: targetUser._id, status: 'pending_sent' });
-    targetUser.contacts.push({ user: req.user._id, status: 'pending_received' });
+    // Add pending requests to both users, recording who initiated the request
+    sender.contacts.push({ user: targetUser._id, status: 'pending_sent', requestedBy: req.user._id });
+    targetUser.contacts.push({ user: req.user._id, status: 'pending_received', requestedBy: req.user._id });
 
     await sender.save();
     await targetUser.save();
@@ -282,13 +283,17 @@ router.post('/contacts/accept', protect, async (req, res) => {
 
     const otherIdx = otherUser.contacts.findIndex(c => c.user.toString() === req.user._id.toString() && c.status === 'pending_sent');
 
-    // Update statuses to accepted
+    // Update statuses to accepted (preserves requestedBy from the original request)
     user.contacts[contactIdx].status = 'accepted';
     if (otherIdx !== -1) {
       otherUser.contacts[otherIdx].status = 'accepted';
     } else {
-      // In case of inconsistency, add it
-      otherUser.contacts.push({ user: req.user._id, status: 'accepted' });
+      // In case of inconsistency, add it and inherit the requester from this side
+      otherUser.contacts.push({
+        user: req.user._id,
+        status: 'accepted',
+        requestedBy: user.contacts[contactIdx].requestedBy || contactId
+      });
     }
 
     await user.save();

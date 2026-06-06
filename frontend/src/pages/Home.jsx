@@ -237,7 +237,10 @@ const Home = () => {
       try {
         const contactsRes = await axios.get('/api/auth/contacts');
         const allContacts = contactsRes.data.data || [];
-        const accepted = allContacts.filter(c => c.status === 'accepted');
+        // Only show contacts the current user initiated AND that are accepted
+        const accepted = allContacts.filter(c =>
+          c.status === 'accepted' && String(c.requestedBy) === String(userId)
+        );
 
         // Track their IDs for socket room joining
         const ids = accepted

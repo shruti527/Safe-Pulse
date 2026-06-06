@@ -8,7 +8,8 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   contacts: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    status: { type: String, enum: ['pending_sent', 'pending_received', 'accepted'] }
+    status: { type: String, enum: ['pending_sent', 'pending_received', 'accepted'] },
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
   }],
   ghostMode: { type: Boolean, default: false },
   pushNotifications: { type: Boolean, default: true },
