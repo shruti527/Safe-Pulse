@@ -11,6 +11,9 @@ const generateToken = (id) => {
   });
 };
 
+// Escape user-supplied text before using it in a RegExp to prevent injection
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // @route   POST /api/auth/register
 // @desc    Register a new user
 router.post('/register', async (req, res) => {
@@ -30,6 +33,16 @@ router.post('/register', async (req, res) => {
     });
 
     if (user) {
+      // Activate the user's session — they are considered online until they explicitly log out
+      user.sessionActive = true;
+      user.sessionStartedAt = new Date();
+      await user.save();
+
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('user_status_change', { userId: user._id.toString(), status: 'Online' });
+      }
+
       res.status(201).json({
         success: true,
         _id: user._id,
@@ -56,6 +69,16 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
+      // Activate session on login — user stays online until explicit logout
+      user.sessionActive = true;
+      user.sessionStartedAt = new Date();
+      await user.save();
+
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('user_status_change', { userId: user._id.toString(), status: 'Online' });
+      }
+
       res.json({
         success: true,
         _id: user._id,
@@ -68,6 +91,28 @@ router.post('/login', async (req, res) => {
     }
   } catch (error) {
     console.error(error);
+    res.status(500).json({ success: false, message: 'Server Error' });
+  }
+});
+
+// @route   POST /api/auth/logout
+// @desc    Mark the user as offline — must be called explicitly to end the session
+router.post('/logout', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (user) {
+      user.sessionActive = false;
+      user.sessionStartedAt = null;
+      await user.save();
+
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('user_status_change', { userId: user._id.toString(), status: 'Offline' });
+      }
+    }
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Error logging out:', error);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 });
@@ -130,8 +175,8 @@ router.put('/settings', protect, async (req, res) => {
 router.get('/contacts', protect, async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
-      .populate('contacts.user', 'name email phone ghostMode');
-    
+      .populate('contacts.user', 'name email phone ghostMode sessionActive');
+
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -139,7 +184,9 @@ router.get('/contacts', protect, async (req, res) => {
     const contactsList = user.contacts.map(c => {
       if (!c.user) return null;
       const contactObj = c.user.toObject();
-      const isOnline = global.onlineUsers && global.onlineUsers.has(c.user._id.toString()) && !c.user.ghostMode;
+      // Online status is driven by the DB session flag, not the live socket,
+      // so users who closed the browser without logging out still appear online.
+      const isOnline = c.user.sessionActive === true && !c.user.ghostMode;
       return {
         _id: c._id,
         user: {
@@ -162,37 +209,52 @@ router.get('/contacts', protect, async (req, res) => {
 // @desc    Send contact request (by email or phone)
 router.post('/contacts/request', protect, async (req, res) => {
   try {
-    const { emailOrPhone } = req.body;
+    const { emailOrPhone, name } = req.body;
     if (!emailOrPhone) {
       return res.status(400).json({ success: false, message: 'Please provide an email or phone number' });
     }
 
     const trimmedValue = emailOrPhone.trim();
-    const isEmail = trimmedValue.includes('@');
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValue);
     const normalizedPhone = trimmedValue.replace(/\D/g, '');
+
+    console.log(`[CONTACTS REQUEST] search=${trimmedValue} isEmail=${isEmail} normalizedPhone=${normalizedPhone} name=${name || '(none)'}`);
 
     let query;
     if (isEmail) {
-      query = { email: trimmedValue.toLowerCase() };
+      // Exact case-insensitive email match
+      query = { email: { $regex: new RegExp('^' + escapeRegex(trimmedValue.toLowerCase()) + '$', 'i') } };
+    } else if (normalizedPhone.length >= 10) {
+      // Normalize the phone field in the DB on the fly, then match the last 10 digits.
+      // This is robust to any format the phone may have been stored in
+      // (with spaces, dashes, leading country code, etc.).
+      const last10Digits = normalizedPhone.slice(-10);
+      query = {
+        $expr: {
+          $regexMatch: {
+            input: { $replaceAll: { input: '$phone', find: /\D/g, replacement: '' } },
+            regex: last10Digits + '$'
+          }
+        }
+      };
     } else {
-      if (normalizedPhone.length >= 10) {
-        const last10Digits = normalizedPhone.slice(-10);
-        const regexPattern = last10Digits.split('').join('\\D*') + '$';
-        query = { phone: { $regex: new RegExp(regexPattern) } };
-      } else {
-        query = {
-          $or: [
-            { phone: trimmedValue },
-            { phone: normalizedPhone }
-          ]
-        };
-      }
+      // Short input — try exact match on raw or normalized
+      query = {
+        $or: [
+          { phone: trimmedValue },
+          { phone: normalizedPhone }
+        ]
+      };
     }
 
     const targetUser = await User.findOne(query);
 
     if (!targetUser) {
-      return res.status(200).json({ success: false, message: 'User not found with this email/phone' });
+      console.log(`[CONTACTS REQUEST] NO MATCH for ${trimmedValue} (normalized=${normalizedPhone})`);
+      return res.status(200).json({
+        success: false,
+        message: 'User not found. The contact must be registered with the same email or phone number.'
+      });
     }
 
     if (targetUser._id.toString() === req.user._id.toString()) {

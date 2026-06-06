@@ -197,8 +197,14 @@ const Profile = () => {
   }, [fetchUser]);
 
   /* ─── actions ─── */
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await axios.post('/api/auth/logout');
+    } catch (err) {
+      console.error('Logout request failed:', err);
+    }
     localStorage.removeItem('token');
+    localStorage.removeItem('userId');
     delete axios.defaults.headers.common['Authorization'];
     navigate('/login');
   };

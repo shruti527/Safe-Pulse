@@ -13,6 +13,9 @@ export default function AddContactModal({ onClose, onSubmit, errorMessage }) {
   const [picking, setPicking] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // Manual entry state
+  const [manualName, setManualName] = useState('');
+
   // Desktop batch-add form state
   const [batchName, setBatchName] = useState('');
   const [batchValue, setBatchValue] = useState('');
@@ -34,7 +37,10 @@ export default function AddContactModal({ onClose, onSubmit, errorMessage }) {
 
   const handleManualSubmit = (e) => {
     e.preventDefault();
-    if (input.trim()) onSubmit(input.trim());
+    const val = input.trim();
+    if (!val) return;
+    const trimmedName = manualName.trim();
+    onSubmit(val, { name: trimmedName || undefined });
   };
 
   // ── Native picker (mobile Chrome only) ──────────────────────────────────────
@@ -236,17 +242,28 @@ export default function AddContactModal({ onClose, onSubmit, errorMessage }) {
 
         {/* ── Manual tab ── */}
         {tab === 'manual' && (
-          <form onSubmit={handleManualSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <form onSubmit={handleManualSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <input
               type="text"
-              placeholder="Email or phone number"
+              placeholder="Name (e.g., Mom, John)"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              autoFocus
+              style={s.input}
+            />
+            <input
+              type="tel"
+              inputMode="tel"
+              placeholder="Mobile number or email"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              autoFocus
               required
               style={s.input}
             />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <p style={{ fontSize: '11px', color: '#6b7280', margin: '-4px 2px 0' }}>
+              Country code (e.g. <strong>91</strong>) is optional — the system matches the last 10 digits.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
               <button type="button" onClick={onClose} style={s.btnSecondary}>Cancel</button>
               <button type="submit" style={s.btnPrimary}>Send Request</button>
             </div>

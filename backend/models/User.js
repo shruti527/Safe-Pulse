@@ -15,6 +15,8 @@ const userSchema = new mongoose.Schema({
   pushNotifications: { type: Boolean, default: true },
   smartAlerts: { type: Boolean, default: true },
   fcmToken: { type: String, default: null },
+  sessionActive: { type: Boolean, default: false },
+  sessionStartedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

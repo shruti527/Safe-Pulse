@@ -1,12 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getSocket } from '../socket';
 import AddContactModal from "../components/AddContactModal";
 
 // ContactCard component displays individual contact details and actions based on status
-const ContactCard = ({ contact, onAccept, onReject, onCancel, onTrack }) => {
+const ContactCard = ({ contact, onAccept, onReject, onCancel, onTrack, onDelete, isMenuOpen, onToggleMenu }) => {
   const isOnline = contact.status === 'Online' || contact.online;
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        onToggleMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isMenuOpen, onToggleMenu]);
 
   return (
     <div className="bg-surface-container-low dark:bg-surface-container/20 rounded-xl p-4 flex items-center justify-between mb-3 border border-surface-container dark:border-white/5">
@@ -54,9 +66,31 @@ const ContactCard = ({ contact, onAccept, onReject, onCancel, onTrack }) => {
             <span className="material-symbols-outlined text-[18px]">location_on</span>
           </button>
         )}
-        <button className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:bg-surface-dim transition-colors">
-          <span className="material-symbols-outlined text-[18px]">more_vert</span>
-        </button>
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => onToggleMenu(contact._id || contact.userId)}
+            className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:bg-surface-dim transition-colors"
+            title="More options"
+          >
+            <span className="material-symbols-outlined text-[18px]">more_vert</span>
+          </button>
+          {isMenuOpen && (
+            <div className="absolute right-0 top-10 z-50 bg-white dark:bg-surface-container-high rounded-lg shadow-lg border border-black/10 dark:border-white/10 py-1 min-w-[160px]">
+              <button
+                onClick={() => {
+                  if (window.confirm(`Delete ${contact.name} from your trusted contacts? This cannot be undone.`)) {
+                    onDelete(contact);
+                  }
+                  onToggleMenu(null);
+                }}
+                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">delete</span>
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -69,6 +103,7 @@ const Contacts = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [addError, setAddError] = useState('');
+  const [openMenuId, setOpenMenuId] = useState(null);
 
   // Fetch contacts from backend
   const fetchContacts = async () => {
@@ -153,9 +188,9 @@ const Contacts = () => {
   // When `options.silent` is true (phonebook batch), we skip closing the modal and refreshing
   // mid-loop — the modal itself calls onClose after all requests finish, then we refresh once.
   const handleAddSubmit = async (value, options = {}) => {
-    const { silent = false } = options;
+    const { silent = false, name } = options;
     try {
-      const res = await axios.post('/api/auth/contacts/request', { emailOrPhone: value });
+      const res = await axios.post('/api/auth/contacts/request', { emailOrPhone: value, name });
       if (res.data.success) {
         if (!silent) {
           setShowAddModal(false);
@@ -210,6 +245,15 @@ const Contacts = () => {
 
   const handleTrackContact = (contact) => {
     navigate(`/?track=${contact.userId}`);
+  };
+
+  const handleDeleteContact = async (contact) => {
+    try {
+      await axios.post('/api/auth/contacts/reject', { contactId: contact.userId });
+      fetchContacts();
+    } catch (err) {
+      console.error('Delete failed:', err.response?.data || err);
+    }
   };
 
   const filteredContacts = contacts.filter(c => {
@@ -278,6 +322,9 @@ const Contacts = () => {
             onReject={handleReject}
             onCancel={handleCancelRequest}
             onTrack={handleTrackContact}
+            onDelete={handleDeleteContact}
+            isMenuOpen={openMenuId === (contact._id || contact.userId)}
+            onToggleMenu={setOpenMenuId}
           />
         ))}
         {filteredContacts.length === 0 && (

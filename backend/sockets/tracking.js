@@ -182,20 +182,13 @@ module.exports = function (io) {
       socket.join(`user_${userId}`);
       debugLog(`[SOCKET] User ${userId} joined room user_${userId} on socket ${socket.id}`);
 
-      // Track online status
+      // Track which sockets belong to this user (for cleanup on disconnect).
+      // We do NOT broadcast online status here — that is driven by sessionActive
+      // in the DB, set explicitly on login and cleared on logout.
       if (!global.onlineUsers.has(userId)) {
         global.onlineUsers.set(userId, new Set());
       }
       global.onlineUsers.get(userId).add(socket.id);
-
-      // Fetch user to check ghostMode
-      const user = await User.findById(userId);
-      const isGhost = user ? user.ghostMode : false;
-
-      if (!isGhost) {
-        // Broadcast user's online status to everyone
-        io.emit('user_status_change', { userId, status: 'Online' });
-      }
     });
 
     // 1. startTracking
@@ -532,8 +525,9 @@ module.exports = function (io) {
           userSockets.delete(socket.id);
           if (userSockets.size === 0) {
             global.onlineUsers.delete(userId);
-            // Broadcast offline status
-            io.emit('user_status_change', { userId, status: 'Offline' });
+            // Do NOT broadcast offline here — closing the browser is not a logout.
+            // The sessionActive DB flag remains true; the contacts endpoint
+            // will continue to show this user as Online.
           }
         }
       }
