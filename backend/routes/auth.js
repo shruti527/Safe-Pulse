@@ -220,34 +220,40 @@ router.post('/contacts/request', protect, async (req, res) => {
 
     console.log(`[CONTACTS REQUEST] search=${trimmedValue} isEmail=${isEmail} normalizedPhone=${normalizedPhone} name=${name || '(none)'}`);
 
-    let query;
+    let targetUser = null;
+
     if (isEmail) {
       // Exact case-insensitive email match
-      query = { email: { $regex: new RegExp('^' + escapeRegex(trimmedValue.toLowerCase()) + '$', 'i') } };
+      const emailQuery = { email: { $regex: new RegExp('^' + escapeRegex(trimmedValue.toLowerCase()) + '$', 'i') } };
+      targetUser = await User.findOne(emailQuery);
     } else if (normalizedPhone.length >= 10) {
-      // Normalize the phone field in the DB on the fly, then match the last 10 digits.
-      // This is robust to any format the phone may have been stored in
-      // (with spaces, dashes, leading country code, etc.).
+      // Build a regex that matches the last 10 digits of the user's input at the end
+      // of the stored phone string. \d* at the start allows the engine to skip over
+      // any leading country-code digits (e.g. "91" in "919876543210"); \D* between
+      // each target digit allows spaces, dashes, parentheses, etc.
       const last10Digits = normalizedPhone.slice(-10);
-      query = {
-        $expr: {
-          $regexMatch: {
-            input: { $replaceAll: { input: '$phone', find: /\D/g, replacement: '' } },
-            regex: last10Digits + '$'
-          }
-        }
-      };
+      const phoneRegex = new RegExp('\\d*' + last10Digits.split('').join('\\D*') + '$');
+      targetUser = await User.findOne({ phone: { $regex: phoneRegex } });
+
+      // Fallback: if the regex didn't find anything (e.g. phone stored in a weird format),
+      // scan all users with a non-empty phone and do the suffix match in JS.
+      if (!targetUser) {
+        const candidates = await User.find({ phone: { $exists: true, $ne: '' } })
+          .select('name email phone');
+        targetUser = candidates.find((u) => {
+          const digits = (u.phone || '').replace(/\D/g, '');
+          return digits.length >= 10 && digits.slice(-10) === last10Digits;
+        }) || null;
+      }
     } else {
       // Short input — try exact match on raw or normalized
-      query = {
+      targetUser = await User.findOne({
         $or: [
           { phone: trimmedValue },
           { phone: normalizedPhone }
         ]
-      };
+      });
     }
-
-    const targetUser = await User.findOne(query);
 
     if (!targetUser) {
       console.log(`[CONTACTS REQUEST] NO MATCH for ${trimmedValue} (normalized=${normalizedPhone})`);
