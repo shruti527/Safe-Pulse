@@ -107,6 +107,9 @@ router.post('/logout', protect, async (req, res) => {
 
       const io = req.app.get('io');
       if (io) {
+        // Force-disconnect all of this user's open sockets so the in-memory
+        // onlineUsers map is cleared in addition to the DB flag.
+        io.in(`user_${user._id}`).disconnectSockets(true);
         io.emit('user_status_change', { userId: user._id.toString(), status: 'Offline' });
       }
     }
@@ -184,9 +187,13 @@ router.get('/contacts', protect, async (req, res) => {
     const contactsList = user.contacts.map(c => {
       if (!c.user) return null;
       const contactObj = c.user.toObject();
-      // Online status is driven by the DB session flag, not the live socket,
-      // so users who closed the browser without logging out still appear online.
-      const isOnline = c.user.sessionActive === true && !c.user.ghostMode;
+      // Online when EITHER the persistent DB session flag is set (new behaviour)
+      // OR the user has an active socket (old behaviour / safety net for legacy
+      // users whose sessionActive field was never written).
+      const isOnline = (
+        c.user.sessionActive === true ||
+        (global.onlineUsers && global.onlineUsers.has(c.user._id.toString()))
+      ) && !c.user.ghostMode;
       return {
         _id: c._id,
         user: {

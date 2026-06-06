@@ -183,12 +183,27 @@ module.exports = function (io) {
       debugLog(`[SOCKET] User ${userId} joined room user_${userId} on socket ${socket.id}`);
 
       // Track which sockets belong to this user (for cleanup on disconnect).
-      // We do NOT broadcast online status here — that is driven by sessionActive
-      // in the DB, set explicitly on login and cleared on logout.
       if (!global.onlineUsers.has(userId)) {
         global.onlineUsers.set(userId, new Set());
       }
       global.onlineUsers.get(userId).add(socket.id);
+
+      // Mark session as active in the DB as soon as a socket connects. This keeps
+      // legacy users (whose sessionActive field was never written on register/login)
+      // in sync, and makes any active app user appear online even after a server
+      // restart that wiped the in-memory onlineUsers map.
+      try {
+        const updated = await User.findByIdAndUpdate(
+          userId,
+          { $set: { sessionActive: true, sessionStartedAt: new Date() } },
+          { new: false }
+        );
+        if (updated && updated.sessionActive !== true) {
+          debugLog(`[SOCKET] Refreshed sessionActive=true for user ${userId}`);
+        }
+      } catch (err) {
+        console.error('[SOCKET] Failed to refresh sessionActive on connect:', err.message);
+      }
     });
 
     // 1. startTracking
