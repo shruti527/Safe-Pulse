@@ -99,7 +99,9 @@ export default function AddContactModal({ onClose, onSubmit, errorMessage }) {
     if (sending || pickedContacts.length === 0) return;
     setSending(true);
     try {
-      await Promise.allSettled(pickedContacts.map((c) => onSubmit(c.value, { silent: true })));
+      for (const c of pickedContacts) {
+        await onSubmit(c.value, { silent: true });
+      }
     } finally {
       setSending(false);
       onClose();

@@ -17,8 +17,11 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// Hash password before saving
+// Hash password and normalize phone number before saving
 userSchema.pre('save', async function(next) {
+  if (this.phone) {
+    this.phone = this.phone.replace(/\D/g, '');
+  }
   if (!this.isModified('password')) return next();
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);

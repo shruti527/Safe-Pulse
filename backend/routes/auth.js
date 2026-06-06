@@ -170,15 +170,22 @@ router.post('/contacts/request', protect, async (req, res) => {
     const isEmail = trimmedValue.includes('@');
     const normalizedPhone = trimmedValue.replace(/\D/g, '');
 
-    // Find the target user by email or phone; accept formatted phone input too.
-    const query = isEmail
-      ? { email: trimmedValue.toLowerCase() }
-      : {
+    let query;
+    if (isEmail) {
+      query = { email: trimmedValue.toLowerCase() };
+    } else {
+      if (normalizedPhone.length >= 10) {
+        const last10Digits = normalizedPhone.slice(-10);
+        query = { phone: { $regex: new RegExp(last10Digits + '$') } };
+      } else {
+        query = {
           $or: [
             { phone: trimmedValue },
             { phone: normalizedPhone }
           ]
         };
+      }
+    }
 
     const targetUser = await User.findOne(query);
 

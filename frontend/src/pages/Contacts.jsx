@@ -109,6 +109,11 @@ const Contacts = () => {
     // Listen for real-time contact status updates via singleton Socket.IO
     const socket = getSocket();
 
+    const userId = localStorage.getItem('userId');
+    if (userId) {
+      socket.emit('join_user_room', userId);
+    }
+
     // New incoming contact request — refresh list
     socket.on('contact_request_received', () => {
       fetchContacts();

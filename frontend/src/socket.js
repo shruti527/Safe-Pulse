@@ -48,6 +48,12 @@ export const getSocket = () => {
     socket.connect();
   }
 
+  // Proactively join the room if we have a userId and the socket is already connected
+  const userId = localStorage.getItem('userId');
+  if (socket && socket.connected && userId) {
+    socket.emit('join_user_room', userId);
+  }
+
   return socket;
 };
 
