@@ -23,7 +23,20 @@ const AppContent = () => {
   const hideNavPaths = ['/splash', '/onboarding', '/login', '/register', '/sos'];
   const shouldHideNav = hideNavPaths.includes(location.pathname);
 
+  const [isInitialLoad, setIsInitialLoad] = React.useState(true);
+
   React.useEffect(() => {
+    if (isInitialLoad) {
+      if (location.pathname !== '/splash') {
+        navigate('/splash', { replace: true });
+      }
+      setIsInitialLoad(false);
+    }
+  }, [isInitialLoad, location.pathname, navigate]);
+
+  React.useEffect(() => {
+    if (isInitialLoad) return; // wait until initial load redirect is complete
+
     const handleNotificationClick = (e) => {
       const data = e.detail;
       console.log('[APP] Foreground notification click handler triggered:', data);
@@ -39,6 +52,10 @@ const AppContent = () => {
     window.addEventListener('safepulse-notification-click', handleNotificationClick);
     return () => window.removeEventListener('safepulse-notification-click', handleNotificationClick);
   }, [navigate]);
+
+  if (isInitialLoad) {
+    return null; // Prevents ProtectedRoute from redirecting before we reach the Splash screen
+  }
 
   return (
     <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-surface dark:bg-safepulse-dark">

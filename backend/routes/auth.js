@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { protect } = require('../middleware/authentication');
+const Location = require('../models/Location');
 
 // Generate JWT
 const generateToken = (id) => {
@@ -184,7 +185,7 @@ router.get('/contacts', protect, async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    const contactsList = user.contacts.map(c => {
+    const contactsList = await Promise.all(user.contacts.map(async c => {
       if (!c.user) return null;
       const contactObj = c.user.toObject();
       // Online when EITHER the persistent DB session flag is set (new behaviour)
@@ -194,18 +195,32 @@ router.get('/contacts', protect, async (req, res) => {
         c.user.sessionActive === true ||
         (global.onlineUsers && global.onlineUsers.has(c.user._id.toString()))
       ) && !c.user.ghostMode;
+      
+      let lastLocation = null;
+      if (c.status === 'accepted' && !c.user.ghostMode) {
+        const loc = await Location.findOne({ userId: c.user._id }).sort({ timestamp: -1 });
+        if (loc) {
+          lastLocation = {
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            timestamp: loc.timestamp
+          };
+        }
+      }
+
       return {
         _id: c._id,
         user: {
           ...contactObj,
-          status: isOnline ? 'Online' : 'Offline'
+          status: isOnline ? 'Online' : 'Offline',
+          lastLocation
         },
         status: c.status,
         requestedBy: c.requestedBy ? c.requestedBy.toString() : null
       };
-    }).filter(Boolean);
+    }));
 
-    res.json({ success: true, data: contactsList });
+    res.json({ success: true, data: contactsList.filter(Boolean) });
   } catch (error) {
     console.error('Error fetching contacts:', error);
     res.status(500).json({ success: false, message: 'Server Error' });

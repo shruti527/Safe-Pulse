@@ -3,11 +3,8 @@ import { NavLink } from 'react-router-dom';
 
 const navItems = [
   { path: '/',         icon: 'home',              label: 'Home',     fill: true },
-  { path: '/tracking', icon: 'near_me',           label: 'Tracking', fill: true },
   { path: '/contacts', icon: 'group',             label: 'Contacts', fill: true },
   { path: '/zones',    icon: 'share_location',    label: 'Zones',    fill: true },
-  { path: '/alerts',   icon: 'notifications',     label: 'Alerts',   hasBadge: true },
-  { path: '/profile',  icon: 'person',            label: 'Profile' },
 ];
 
 const BottomNavBar = () => {

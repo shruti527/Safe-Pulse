@@ -7,15 +7,30 @@ import { registerFCMToken, initForegroundMessenger } from '../firebase';
 
 const Home = () => {
   const navigate = useNavigate();
-  const [currentLocation, setCurrentLocation] = useState(null);
-  const [address, setAddress] = useState('Fetching GPS position...');
-  const [trackingActive, setTrackingActive] = useState(true);
+  const [currentLocation, setCurrentLocation] = useState(() => {
+    const saved = localStorage.getItem('lastLocation');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [address, setAddress] = useState(() => {
+    const saved = localStorage.getItem('lastAddress');
+    return saved || 'Fetching GPS position...';
+  });
+  const [trackingActive, setTrackingActive] = useState(() => {
+    const saved = localStorage.getItem('trackingActive');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
   const [geofences, setGeofences] = useState([]);
   const [contactsOnMap, setContactsOnMap] = useState([]);
   const [focusedContact, setFocusedContact] = useState(null);
   const [acceptedContactIds, setAcceptedContactIds] = useState([]);
-  const [checkInActive, setCheckInActive] = useState(false);
-  const [checkInDeadline, setCheckInDeadline] = useState(null);
+  const [checkInActive, setCheckInActive] = useState(() => {
+    const saved = localStorage.getItem('checkInActive');
+    return saved !== null ? JSON.parse(saved) : false;
+  });
+  const [checkInDeadline, setCheckInDeadline] = useState(() => {
+    const saved = localStorage.getItem('checkInDeadline');
+    return saved || null;
+  });
   const [checkInTimeLeft, setCheckInTimeLeft] = useState('');
 
   useEffect(() => {
@@ -70,12 +85,74 @@ const Home = () => {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   const SOCKET_URL = API_URL.replace('/api', '');
 
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem('sessionId') || null);
+  const [trackingStartTime, setTrackingStartTime] = useState(() => {
+    const saved = localStorage.getItem('trackingStartTime');
+    return saved ? parseInt(saved, 10) : null;
+  });
+  const [trackingDuration, setTrackingDuration] = useState('');
+  const [recenterTrigger, setRecenterTrigger] = useState(0);
+
+  // Sync state to localStorage
+  useEffect(() => {
+    localStorage.setItem('trackingActive', JSON.stringify(trackingActive));
+  }, [trackingActive]);
+
+  useEffect(() => {
+    localStorage.setItem('checkInActive', JSON.stringify(checkInActive));
+  }, [checkInActive]);
+
+  useEffect(() => {
+    if (checkInDeadline) {
+      localStorage.setItem('checkInDeadline', checkInDeadline);
+    } else {
+      localStorage.removeItem('checkInDeadline');
+    }
+  }, [checkInDeadline]);
+
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('sessionId', sessionId);
+    } else {
+      localStorage.removeItem('sessionId');
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (trackingStartTime) {
+      localStorage.setItem('trackingStartTime', trackingStartTime.toString());
+    } else {
+      localStorage.removeItem('trackingStartTime');
+    }
+  }, [trackingStartTime]);
+
+  // Compute tracking elapsed duration
+  useEffect(() => {
+    if (!trackingActive || !trackingStartTime) {
+      setTrackingDuration('');
+      return;
+    }
+
+    const updateDuration = () => {
+      const elapsed = Date.now() - trackingStartTime;
+      const totalSecs = Math.floor(elapsed / 1000);
+      const hrs = Math.floor(totalSecs / 3600);
+      const mins = Math.floor((totalSecs % 3600) / 60);
+      const secs = totalSecs % 60;
+      setTrackingDuration(
+        `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+      );
+    };
+
+    updateDuration();
+    const interval = setInterval(updateDuration, 1000);
+    return () => clearInterval(interval);
+  }, [trackingActive, trackingStartTime]);
+
   // Tracks timestamp of the last successful location POST to throttle API calls
   const lastSentRef = useRef(0);
   const THROTTLE_INTERVAL_MS = 12000; // send at most once every 10-15 seconds for backend efficiency
   const socketRef = useRef(null);
-  const [sessionId, setSessionId] = useState(null);
-  const [recenterTrigger, setRecenterTrigger] = useState(0);
 
   const queryParams = new URLSearchParams(window.location.search);
   const trackId = queryParams.get('track');
@@ -99,6 +176,7 @@ const Home = () => {
     
     socket.on('session_started', (data) => {
       setSessionId(data.sessionId);
+      setTrackingStartTime(Date.now());
     });
 
     // Update position for ANY tracked contact on the map
@@ -155,6 +233,21 @@ const Home = () => {
     fetchGeofences();
   }, [userId]);
 
+  // 1b. Fast low-accuracy position fill (1-3s via WiFi/cell) while GPS acquires
+  useEffect(() => {
+    if (currentLocation || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const loc = { latitude, longitude, accuracy };
+        setCurrentLocation(loc);
+        localStorage.setItem('lastLocation', JSON.stringify(loc));
+      },
+      () => {},
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 120000 }
+    );
+  }, []);
+
   // 2. Fetch user geolocation and watch movements
   useEffect(() => {
     if (!trackingActive || !userId) return;
@@ -164,7 +257,9 @@ const Home = () => {
       watchId = navigator.geolocation.watchPosition(
         async (position) => {
           const { latitude, longitude, accuracy } = position.coords;
-          setCurrentLocation({ latitude, longitude, accuracy });
+          const loc = { latitude, longitude, accuracy };
+          setCurrentLocation(loc);
+          localStorage.setItem('lastLocation', JSON.stringify(loc));
 
           // Throttle: only send if THROTTLE_INTERVAL_MS has elapsed
           const now = Date.now();
@@ -218,7 +313,9 @@ const Home = () => {
             addr.city || addr.town || addr.village || addr.county
           ].filter(Boolean).join(', ');
 
-          setAddress(cleanAddr || data.display_name || 'Coordinates resolved');
+          const resolved = cleanAddr || data.display_name || 'Coordinates resolved';
+          setAddress(resolved);
+          localStorage.setItem('lastAddress', resolved);
         } else {
           setAddress(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
         }
@@ -237,9 +334,9 @@ const Home = () => {
       try {
         const contactsRes = await axios.get('/api/auth/contacts');
         const allContacts = contactsRes.data.data || [];
-        // Only show contacts the current user initiated AND that are accepted
+        // Show all accepted trusted contacts on the map
         const accepted = allContacts.filter(c =>
-          c.status === 'accepted' && String(c.requestedBy) === String(userId)
+          c.status === 'accepted'
         );
 
         // Track their IDs for socket room joining
@@ -346,7 +443,7 @@ const Home = () => {
             </div>
           </div>
           <p className="font-headline-md text-headline-md font-bold mb-stack-sm">
-            {trackingActive ? '00:42:15' : '--:--:--'}
+            {trackingActive ? trackingDuration || '00:00:00' : '--:--:--'}
           </p>
 
           <button 
@@ -355,8 +452,10 @@ const Home = () => {
                 socketRef.current.emit('end_session', { userId, sessionId });
                 setTrackingActive(false);
                 setSessionId(null);
+                setTrackingStartTime(null);
               } else {
                 setTrackingActive(true);
+                setTrackingStartTime(Date.now());
                 if (currentLocation) {
                   socketRef.current.emit('start_session', { 
                     userId, 

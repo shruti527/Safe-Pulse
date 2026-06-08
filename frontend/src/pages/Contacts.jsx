@@ -40,6 +40,11 @@ const ContactCard = ({ contact, onAccept, onReject, onCancel, onTrack, onDelete,
             {contact.statusLabel && (
               <span className="block text-[11px] text-secondary mt-1">
                 {contact.statusLabel}
+                {!isOnline && contact.lastLocation && (
+                  <span className="text-on-surface-variant ml-1">
+                    • Last seen: {new Date(contact.lastLocation.timestamp).toLocaleDateString()} {new Date(contact.lastLocation.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
               </span>
             )}
           </p>
@@ -127,6 +132,8 @@ const Contacts = () => {
               : c.status === 'pending_sent'
                 ? 'Request sent'
                 : '',
+          online: c.user.status === 'Online',
+          lastLocation: c.user.lastLocation,
           trackingMe: c.status === 'accepted' || c.status === 'pending_received',
           iTrack: c.status === 'accepted' || c.status === 'pending_sent'
         };

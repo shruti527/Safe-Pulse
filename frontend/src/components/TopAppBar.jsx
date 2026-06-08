@@ -1,4 +1,10 @@
 import React from 'react';
+import { NavLink } from 'react-router-dom';
+
+const navItems = [
+  { path: '/alerts',  icon: 'notifications',   hasBadge: true },
+  { path: '/profile', icon: 'person'},
+];
 
 const TopAppBar = () => {
   return (
@@ -9,13 +15,35 @@ const TopAppBar = () => {
           <span className="font-headline-md text-headline-md font-bold tracking-tight text-primary dark:text-on-primary">SafePulse</span>
         </div>
         <div className="flex items-center gap-stack-md">
-          <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-primary/10">
-            <img
-              alt="User Profile"
-              className="w-full h-full object-cover"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuD3jL-pQQn_SsQKQnAGy4Toc7NxRSxeqjcVs3ldD3J5BQVdtkW0xrATzPoprbEvODzGZfqJ557Dp8QLONAh7Dn2XQU5oeLxQyQ_UExvdfGTM9W-qKBP2TaQqiVpQnsdzEwbBTPve1j886XcjDbID-tUMbv6HxOZSkeJ2LX_APD8JQuB7ksixSu6XHVkt2dHtM_f-4f98SGyFjDbPX6MZxc7i1BrllNyTDGOzDTljpIIRIWBXNl1tHmoB-287ytjfNL7HHhcHELCObA"
-            />
-          </div>
+          {navItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              end={item.path === '/'}
+              className={({ isActive }) =>
+                `relative flex flex-col items-center justify-center px-2 py-1 cursor-pointer transition-colors duration-300 ease-out active:scale-90 rounded-xl ${
+                  isActive
+                    ? 'text-secondary dark:text-secondary-fixed bg-secondary-container/10'
+                    : 'text-on-surface-variant dark:text-outline hover:text-secondary dark:hover:text-secondary-fixed'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <div className="relative flex flex-col items-center justify-center">
+                  <span
+                    className="material-symbols-outlined text-[22px]"
+                    style={{ fontVariationSettings: isActive ? "'FILL' 1" : "'FILL' 0" }}
+                  >
+                    {item.icon}
+                  </span>
+                  <span className="font-label-sm text-label-sm text-[10px]">{item.label}</span>
+                  {item.hasBadge && (
+                    <span className="absolute top-0 right-0 w-2 h-2 bg-error rounded-full" />
+                  )}
+                </div>
+              )}
+            </NavLink>
+          ))}
         </div>
       </div>
     </header>

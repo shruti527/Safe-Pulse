@@ -5,9 +5,19 @@ const Splash = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    sessionStorage.setItem('hasSeenSplash', 'true');
     const timer = setTimeout(() => {
-      navigate('/onboarding');
-    }, 3000);
+      const token = localStorage.getItem('token');
+      const hasCompletedOnboarding = localStorage.getItem('hasCompletedOnboarding');
+      
+      if (token) {
+        navigate('/', { replace: true });
+      } else if (!hasCompletedOnboarding) {
+        navigate('/onboarding', { replace: true });
+      } else {
+        navigate('/login', { replace: true });
+      }
+    }, 4000);
     return () => clearTimeout(timer);
   }, [navigate]);
 

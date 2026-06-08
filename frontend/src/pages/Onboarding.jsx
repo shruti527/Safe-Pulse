@@ -4,6 +4,16 @@ import { useNavigate } from 'react-router-dom';
 const Onboarding = () => {
   const navigate = useNavigate();
 
+  const handleNext = () => {
+    localStorage.setItem('hasCompletedOnboarding', 'true');
+    navigate('/register');
+  };
+
+  const handleSkip = () => {
+    localStorage.setItem('hasCompletedOnboarding', 'true');
+    navigate('/login');
+  };
+
   return (
     <div className="bg-background text-on-background font-body-md min-h-screen flex flex-col items-center justify-center p-container-margin overflow-y-auto relative w-full h-[calc(100vh-130px)] pt-4 pb-24">
       {/* Background Decorative Elements */}
@@ -46,13 +56,21 @@ const Onboarding = () => {
 
           {/* Feature Grid (Subtle) */}
           <div className="grid grid-cols-2 gap-stack-md w-full mb-stack-lg">
-            <div className="flex flex-col items-center p-stack-md bg-surface-container-low dark:bg-surface-container-high rounded-DEFAULT border border-black/5 dark:border-white/5">
-              <span className="material-symbols-outlined text-secondary dark:text-safepulse-accent mb-2" style={{ fontVariationSettings: "'FILL' 1" }}>security</span>
-              <span className="font-label-md text-label-md text-on-surface">Secure Shield</span>
+            <div className="flex flex-col items-center p-stack-sm py-4 bg-surface-container-low dark:bg-surface-container-high rounded-DEFAULT border border-black/5 dark:border-white/5 text-center">
+              <span className="material-symbols-outlined text-error mb-2" style={{ fontVariationSettings: "'FILL' 1" }}>sos</span>
+              <span className="font-label-md text-label-sm text-on-surface">SOS Alerts</span>
             </div>
-            <div className="flex flex-col items-center p-stack-md bg-surface-container-low dark:bg-surface-container-high rounded-DEFAULT border border-black/5 dark:border-white/5">
+            <div className="flex flex-col items-center p-stack-sm py-4 bg-surface-container-low dark:bg-surface-container-high rounded-DEFAULT border border-black/5 dark:border-white/5 text-center">
+              <span className="material-symbols-outlined text-secondary dark:text-safepulse-accent mb-2" style={{ fontVariationSettings: "'FILL' 1" }}>share_location</span>
+              <span className="font-label-md text-label-sm text-on-surface">Live Tracking</span>
+            </div>
+            <div className="flex flex-col items-center p-stack-sm py-4 bg-surface-container-low dark:bg-surface-container-high rounded-DEFAULT border border-black/5 dark:border-white/5 text-center">
               <span className="material-symbols-outlined text-secondary dark:text-safepulse-accent mb-2" style={{ fontVariationSettings: "'FILL' 1" }}>my_location</span>
-              <span className="font-label-md text-label-md text-on-surface">Arrival Alerts</span>
+              <span className="font-label-md text-label-sm text-on-surface">Safe Zones</span>
+            </div>
+            <div className="flex flex-col items-center p-stack-sm py-4 bg-surface-container-low dark:bg-surface-container-high rounded-DEFAULT border border-black/5 dark:border-white/5 text-center">
+              <span className="material-symbols-outlined text-secondary dark:text-safepulse-accent mb-2" style={{ fontVariationSettings: "'FILL' 1" }}>group</span>
+              <span className="font-label-md text-label-sm text-on-surface">Trusted Contacts</span>
             </div>
           </div>
 
@@ -65,18 +83,18 @@ const Onboarding = () => {
 
           {/* Action Button */}
           <button 
-            onClick={() => navigate('/login')}
+            onClick={handleNext}
             className="w-full bg-gradient-to-r from-secondary to-secondary-container text-on-secondary py-5 px-stack-lg rounded-lg font-label-md text-label-md glow-button hover:opacity-90 transition-all active:scale-[0.98] shadow-md"
           >
-            Next
+            Get Started
           </button>
           
           {/* Secondary Action */}
           <button 
-            onClick={() => navigate('/login')}
+            onClick={handleSkip}
             className="mt-stack-md font-label-md text-label-md text-outline hover:text-primary dark:hover:text-on-primary transition-colors"
           >
-            Skip Introduction
+            Log In to Existing Account
           </button>
         </div>
 
