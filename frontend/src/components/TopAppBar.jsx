@@ -6,6 +6,7 @@ const navItems = [
   { path: '/profile', icon: 'person'},
 ];
 
+
 const TopAppBar = () => {
   return (
     <header className="fixed top-0 left-0 w-full z-50 bg-surface/70 dark:bg-surface-container/70 backdrop-blur-xl border-b border-white/20 dark:border-white/10 shadow-sm pt-safe">
