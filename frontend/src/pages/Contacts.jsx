@@ -114,9 +114,11 @@ const Contacts = () => {
   const fetchContacts = async () => {
     try {
       const { data } = await axios.get('/api/auth/contacts');
+      const currentUserId = localStorage.getItem('userId');
       
       const mappedContacts = (data.data || []).map(c => {
         if (!c.user) return null;
+        const isSentByMe = c.requestedBy === currentUserId;
         return {
           _id: c._id,
           userId: c.user._id,
@@ -134,8 +136,8 @@ const Contacts = () => {
                 : '',
           online: c.user.status === 'Online',
           lastLocation: c.user.lastLocation,
-          trackingMe: c.status === 'accepted' || c.status === 'pending_received',
-          iTrack: c.status === 'accepted' || c.status === 'pending_sent'
+          trackingMe: (c.status === 'accepted' && !isSentByMe) || c.status === 'pending_received',
+          iTrack: (c.status === 'accepted' && isSentByMe) || c.status === 'pending_sent'
         };
       }).filter(Boolean);
       
@@ -179,9 +181,24 @@ const Contacts = () => {
       }
     });
 
+    // Real-time online/offline status updates for contact list indicators
+    socket.on('user_status_change', (data) => {
+      setContacts(prev => prev.map(c => {
+        const contactUserId = c.user?._id || c.userId;
+        if (contactUserId === data.userId) {
+          return {
+            ...c,
+            user: { ...(c.user || {}), status: data.status },
+          };
+        }
+        return c;
+      }));
+    });
+
     return () => {
       socket.off('contact_request_received');
       socket.off('contactStatusUpdate');
+      socket.off('user_status_change');
     };
   }, []);
 
@@ -292,13 +309,13 @@ const Contacts = () => {
           onClick={() => setActiveTab('trackingMe')}
           className={`flex-1 py-2 font-label-sm text-label-sm rounded-md transition-all ${activeTab === 'trackingMe' ? 'bg-surface dark:bg-surface-container-high shadow-sm text-primary dark:text-on-primary' : 'text-on-surface-variant'}`}
         >
-          Tracking Me
+          Watching Me     
         </button>
         <button
           onClick={() => setActiveTab('iTrack')}
           className={`flex-1 py-2 font-label-sm text-label-sm rounded-md transition-all ${activeTab === 'iTrack' ? 'bg-surface dark:bg-surface-container-high shadow-sm text-primary dark:text-on-primary' : 'text-on-surface-variant'}`}
         >
-          I Track
+          I'm Watching
         </button>
       </div>
 

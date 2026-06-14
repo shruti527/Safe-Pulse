@@ -1,15 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import MapComponent from '../components/Map';
+import { getSocket } from '../socket';
 
 const SafeZoneCard = ({ zone, onToggleActive, onDelete }) => {
-  // Use a map placeholder image that works beautifully.
-  const mapImage = zone.image || `https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=400`;
-
   return (
     <div className="bg-surface-container-lowest dark:bg-surface-container/20 rounded-xl overflow-hidden mb-4 border border-surface-container dark:border-white/10 shadow-sm relative group">
-      {/* Mini Map Preview */}
-      <div className="h-24 w-full relative">
-        <img src={mapImage} alt={zone.name} className="w-full h-full object-cover" />
+      <div className="h-24 w-full relative bg-gradient-to-br from-secondary/20 to-primary/10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_40%,var(--tw-gradient-stops))] from-secondary/10 to-transparent"></div>
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
         <div className="absolute bottom-2 left-3 right-3 flex justify-between items-end">
           <h3 className="font-headline-sm text-lg font-bold text-white tracking-tight drop-shadow-md">{zone.name}</h3>
@@ -36,10 +34,9 @@ const SafeZoneCard = ({ zone, onToggleActive, onDelete }) => {
         </div>
         
         <div className="flex justify-between items-center mt-3">
-          <div className="flex -space-x-2">
-            <img className="w-6 h-6 rounded-full border border-surface object-cover" src="https://i.pravatar.cc/150?u=1" alt="contact" />
-            <img className="w-6 h-6 rounded-full border border-surface object-cover" src="https://i.pravatar.cc/150?u=2" alt="contact" />
-            <div className="w-6 h-6 rounded-full border border-surface bg-surface-container-high flex items-center justify-center font-label-sm text-[10px] text-on-surface-variant">+1</div>
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[16px] text-outline">groups</span>
+            <span className="font-label-sm text-[11px] text-on-surface-variant">Trusted contacts notified on arrival</span>
           </div>
           <button 
             onClick={() => onToggleActive(zone._id || zone.id)}
@@ -71,7 +68,35 @@ const SafeZones = () => {
   const [gettingLocation, setGettingLocation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // View mode: 'my_zones' | 'track_friend'
+  const [viewMode, setViewMode] = useState('my_zones');
+
+  // Friend tracking state
+  const [iTrackContacts, setITrackContacts] = useState([]);
+  const [selectedFriendId, setSelectedFriendId] = useState(null);
+  const [selectedFriendName, setSelectedFriendName] = useState('');
+  const [friendLocation, setFriendLocation] = useState(null);
+  const [friendGeofences, setFriendGeofences] = useState([]);
+  const [friendLoading, setFriendLoading] = useState(false);
+  const [friendError, setFriendError] = useState(null);
+  const [recenterTrigger, setRecenterTrigger] = useState(0);
+
   const userId = localStorage.getItem('userId');
+  const socketRef = useRef(null);
+
+  // Initialize socket
+  useEffect(() => {
+    socketRef.current = getSocket();
+  }, []);
+
+  // Modal state reset
+  const resetModalForm = () => {
+    setName('');
+    setAddress('');
+    setRadius(200);
+    setLatitude('');
+    setLongitude('');
+  };
 
   const fetchZones = async () => {
     try {
@@ -95,10 +120,116 @@ const SafeZones = () => {
     fetchZones();
   }, [userId]);
 
-  // Request browser geolocation to prefill coordinates
+  // Fetch iTrack contacts (users I am watching)
+  useEffect(() => {
+    if (!userId) return;
+    const fetchContacts = async () => {
+      try {
+        const res = await axios.get('/api/auth/contacts');
+        const allContacts = res.data.data || [];
+        const currentUserId = localStorage.getItem('userId');
+        const iTrack = allContacts.filter(c => {
+          if (c.status !== 'accepted') return false;
+          return String(c.requestedBy) === String(currentUserId);
+        });
+        setITrackContacts(iTrack.map(c => ({
+          userId: c.user?._id || c.userId,
+          name: c.user?.name || c.name || 'Contact',
+          online: c.user?.status === 'Online',
+        })));
+      } catch (err) {
+        console.error('Error fetching contacts for friend tracking:', err);
+      }
+    };
+    fetchContacts();
+  }, [userId]);
+
+  // When a friend is selected, fetch their data and subscribe to socket room
+  useEffect(() => {
+    if (!selectedFriendId) {
+      setFriendLocation(null);
+      setFriendGeofences([]);
+      return;
+    }
+
+    const fetchFriendData = async () => {
+      setFriendLoading(true);
+      setFriendError(null);
+      try {
+        const res = await axios.get(`/api/geofences/track-friend/${selectedFriendId}`);
+        if (res.data.success) {
+          const { location, geofences } = res.data.data;
+          if (location) {
+            setFriendLocation([location.latitude, location.longitude]);
+          } else {
+            setFriendLocation(null);
+          }
+          setFriendGeofences(geofences);
+        } else {
+          setFriendError(res.data.message || 'Failed to load friend data');
+        }
+      } catch (err) {
+        console.error('Error fetching friend data:', err);
+        setFriendError(err.response?.data?.message || 'Failed to load friend tracking data');
+        setFriendLocation(null);
+        setFriendGeofences([]);
+      } finally {
+        setFriendLoading(false);
+      }
+    };
+
+    fetchFriendData();
+
+    // Subscribe to friend's tracking room for real-time updates
+    const socket = socketRef.current;
+    if (socket) {
+      socket.emit('subscribe_to_friend', selectedFriendId);
+
+      const handleFriendLocation = (data) => {
+        if (data.userId === selectedFriendId) {
+          setFriendLocation([data.latitude, data.longitude]);
+        }
+      };
+
+      const handleFriendZoneEvent = (eventType) => (data) => {
+        if (data.userId === selectedFriendId && data.geofenceName) {
+          const verb = eventType === 'safeZoneEntry' ? 'entered' : 'left';
+          setFriendError(`${data.userName} ${verb} ${data.geofenceName}`);
+          setTimeout(() => setFriendError(null), 5000);
+        }
+      };
+
+      socket.on('friend_location_update', handleFriendLocation);
+      socket.on('safeZoneEntry', handleFriendZoneEvent('safeZoneEntry'));
+      socket.on('safeZoneExit', handleFriendZoneEvent('safeZoneExit'));
+
+      return () => {
+        socket.off('friend_location_update', handleFriendLocation);
+        socket.off('safeZoneEntry', handleFriendZoneEvent('safeZoneEntry'));
+        socket.off('safeZoneExit', handleFriendZoneEvent('safeZoneExit'));
+        socket.emit('unsubscribe_from_friend', selectedFriendId);
+      };
+    }
+  }, [selectedFriendId]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current && selectedFriendId) {
+        socketRef.current.emit('unsubscribe_from_friend', selectedFriendId);
+      }
+    };
+  }, []);
+
+  // Re-center when friend location updates
+  useEffect(() => {
+    if (friendLocation) {
+      setRecenterTrigger(t => t + 1);
+    }
+  }, [friendLocation]);
+
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
       return;
     }
     
@@ -111,7 +242,6 @@ const SafeZones = () => {
       },
       (error) => {
         console.error('Error getting location:', error);
-        alert('Unable to retrieve your location. Please enter manually.');
         setGettingLocation(false);
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -138,12 +268,7 @@ const SafeZones = () => {
       const result = res.data;
       if (result.success) {
         setZones((prev) => [...prev, result.data]);
-        // Reset form
-        setName('');
-        setAddress('');
-        setRadius(200);
-        setLatitude('');
-        setLongitude('');
+        resetModalForm();
         setIsModalOpen(false);
       } else {
         alert(result.message || 'Failed to create safe zone.');
@@ -158,7 +283,6 @@ const SafeZones = () => {
 
   const handleToggleActive = async (id) => {
     try {
-      // Optimistic UI update
       setZones((prev) => 
         prev.map((z) => ((z._id || z.id) === id ? { ...z, active: !z.active } : z))
       );
@@ -166,12 +290,11 @@ const SafeZones = () => {
       const res = await axios.patch(`/api/geofences/toggle/${id}`);
       const result = res.data;
       if (!result.success) {
-        // Rollback on failure
         fetchZones();
       }
     } catch (err) {
       console.error('Error toggling active status:', err);
-      fetchZones(); // Rollback
+      fetchZones();
     }
   };
 
@@ -191,62 +314,198 @@ const SafeZones = () => {
     }
   };
 
+  const handleFriendSelect = (friendId, friendName) => {
+    if (friendId === selectedFriendId) {
+      setSelectedFriendId(null);
+      setSelectedFriendName('');
+      return;
+    }
+    setSelectedFriendId(friendId);
+    setSelectedFriendName(friendName);
+  };
+
   return (
     <div className="flex-grow flex flex-col h-[calc(100vh-130px)] bg-surface dark:bg-safepulse-dark relative w-full">
       <div className="px-container-margin pt-4 pb-2">
         <h2 className="font-headline-md text-headline-md font-bold text-on-surface mb-1">Safe Zones</h2>
-        <p className="font-body-sm text-sm text-on-surface-variant mb-6">Get notified when tracked contacts arrive or leave these locations.</p>
-      </div>
+        <p className="font-body-sm text-sm text-on-surface-variant mb-4">
+          {viewMode === 'my_zones'
+            ? 'Get notified when tracked contacts arrive or leave these locations.'
+            : 'Select a contact to view their live location and safe zones.'}
+        </p>
 
-      <div className="flex-grow px-container-margin overflow-y-auto pb-24">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center h-full text-center pb-12">
-            <span className="material-symbols-outlined text-[48px] animate-spin text-secondary">sync</span>
-            <p className="font-body-md text-on-surface-variant mt-2">Loading Safe Zones...</p>
-          </div>
-        ) : error ? (
-          <div className="flex flex-col items-center justify-center h-full text-center pb-12">
-            <span className="material-symbols-outlined text-[48px] text-error">error</span>
-            <p className="font-body-md text-error mt-2">{error}</p>
-            <button 
-              onClick={fetchZones}
-              className="mt-4 px-4 py-2 bg-secondary text-white rounded-full font-label-md hover:opacity-90 transition-opacity"
-            >
-              Retry
-            </button>
-          </div>
-        ) : zones.length > 0 ? (
-          zones.map(zone => (
-            <SafeZoneCard 
-              key={zone._id || zone.id} 
-              zone={zone} 
-              onToggleActive={handleToggleActive} 
-              onDelete={handleDelete}
-            />
-          ))
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-center pb-12">
-            <div className="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mb-4">
-              <span className="material-symbols-outlined text-on-surface-variant text-[40px]">add_location_alt</span>
+        {/* View mode selector */}
+        <div className="flex bg-surface-container-low dark:bg-surface-container rounded-lg p-1 mb-4">
+          <button
+            onClick={() => {
+              setViewMode('my_zones');
+              setSelectedFriendId(null);
+              setSelectedFriendName('');
+            }}
+            className={`flex-1 py-2 font-label-sm text-label-sm rounded-md transition-all ${
+              viewMode === 'my_zones'
+                ? 'bg-surface dark:bg-surface-container-high shadow-sm text-primary dark:text-on-primary'
+                : 'text-on-surface-variant'
+            }`}
+          >
+            My Safe Zones
+          </button>
+          <button
+            onClick={() => setViewMode('track_friend')}
+            className={`flex-1 py-2 font-label-sm text-label-sm rounded-md transition-all ${
+              viewMode === 'track_friend'
+                ? 'bg-surface dark:bg-surface-container-high shadow-sm text-primary dark:text-on-primary'
+                : 'text-on-surface-variant'
+            }`}
+          >
+            Track Friend
+          </button>
+        </div>
+
+        {/* Friend selector dropdown (only in track_friend mode) */}
+        {viewMode === 'track_friend' && (
+          <div className="mb-4">
+            <div className="relative">
+              <select
+                value={selectedFriendId || ''}
+                onChange={(e) => {
+                  if (!e.target.value) {
+                    setSelectedFriendId(null);
+                    setSelectedFriendName('');
+                    return;
+                  }
+                  const contact = iTrackContacts.find(c => c.userId === e.target.value);
+                  handleFriendSelect(contact?.userId, contact?.name);
+                }}
+                className="w-full h-11 px-3 bg-surface-container-lowest dark:bg-surface-container/40 border border-outline/20 rounded-lg font-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/20 transition-all appearance-none"
+              >
+                <option value="">Select a contact to track...</option>
+                {iTrackContacts.map(c => (
+                  <option key={c.userId} value={c.userId}>
+                    {c.name} {c.online ? '● Online' : '○ Offline'}
+                  </option>
+                ))}
+              </select>
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-on-surface-variant pointer-events-none">
+                expand_more
+              </span>
             </div>
-            <h3 className="font-headline-sm text-lg font-bold text-on-surface mb-2">No Safe Zones</h3>
-            <p className="font-body-md text-on-surface-variant max-w-[250px]">Add locations like Home or School to start receiving arrival alerts.</p>
+            {selectedFriendName && (
+              <div className="mt-2 flex items-center justify-between">
+                <p className="font-label-sm text-label-sm text-secondary flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[16px]">visibility</span>
+                  Tracking: <span className="font-bold">{selectedFriendName}</span>
+                </p>
+                <button
+                  onClick={() => {
+                    setSelectedFriendId(null);
+                    setSelectedFriendName('');
+                  }}
+                  className="text-xs text-on-surface-variant hover:text-error transition-colors flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                  Clear
+                </button>
+              </div>
+            )}
+            {iTrackContacts.length === 0 && (
+              <p className="font-body-sm text-xs text-on-surface-variant mt-1">
+                No contacts found. Add contacts from the Contacts page to track their safe zones.
+              </p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Floating Add Button */}
-      <div className="absolute bottom-24 right-6 z-30">
-        <button 
-          onClick={() => {
-            setIsModalOpen(true);
-            handleGetLocation(); // Fetch current coordinates immediately on open
-          }}
-          className="w-14 h-14 rounded-full bg-secondary dark:bg-safepulse-accent text-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
-        >
-          <span className="material-symbols-outlined text-[28px]">add</span>
-        </button>
+      {/* Content area */}
+      <div className="flex-grow relative">
+        {viewMode === 'my_zones' ? (
+          <div className="absolute inset-0 overflow-y-auto px-container-margin pb-24">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center h-full text-center pb-12">
+                <span className="material-symbols-outlined text-[48px] animate-spin text-secondary">sync</span>
+                <p className="font-body-md text-on-surface-variant mt-2">Loading Safe Zones...</p>
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center h-full text-center pb-12">
+                <span className="material-symbols-outlined text-[48px] text-error">error</span>
+                <p className="font-body-md text-error mt-2">{error}</p>
+                <button 
+                  onClick={fetchZones}
+                  className="mt-4 px-4 py-2 bg-secondary text-white rounded-full font-label-md hover:opacity-90 transition-opacity"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : zones.length > 0 ? (
+              zones.map(zone => (
+                <SafeZoneCard 
+                  key={zone._id || zone.id} 
+                  zone={zone} 
+                  onToggleActive={handleToggleActive} 
+                  onDelete={handleDelete}
+                />
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center pb-12">
+                <div className="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center mb-4">
+                  <span className="material-symbols-outlined text-on-surface-variant text-[40px]">add_location_alt</span>
+                </div>
+                <h3 className="font-headline-sm text-lg font-bold text-on-surface mb-2">No Safe Zones</h3>
+                <p className="font-body-md text-on-surface-variant max-w-[250px]">Add locations like Home or School to start receiving arrival alerts.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="absolute inset-0">
+            {/* Friend tracking map */}
+            {friendLoading ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <span className="material-symbols-outlined text-[48px] animate-spin text-secondary">sync</span>
+                <p className="font-body-md text-on-surface-variant mt-2">Loading friend data...</p>
+              </div>
+            ) : friendError ? (
+              <div className="flex flex-col items-center justify-center h-full text-center px-container-margin">
+                <span className="material-symbols-outlined text-[48px] text-error">error</span>
+                <p className="font-body-md text-error mt-2">{friendError}</p>
+              </div>
+            ) : (
+              <>
+                <MapComponent
+                  center={friendLocation}
+                  contacts={friendLocation ? [{ id: selectedFriendId, name: selectedFriendName, position: friendLocation, lastSeen: 'Online' }] : []}
+                  geofences={friendGeofences}
+                  trackingActive={!!friendLocation}
+                  recenterTrigger={recenterTrigger}
+                />
+                {/* Re-center FAB */}
+                <button
+                  onClick={() => setRecenterTrigger(t => t + 1)}
+                  className="absolute bottom-6 right-6 z-30 w-12 h-12 flex items-center justify-center bg-white/80 dark:bg-surface-container-high/90 backdrop-blur-md text-primary rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all border border-white/40"
+                  title="Recenter Map"
+                >
+                  <span className="material-symbols-outlined" style={{fontVariationSettings: "'FILL' 1"}}>my_location</span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Floating Add Button — only show in my_zones mode */}
+      {viewMode === 'my_zones' && (
+        <div className="absolute bottom-24 right-6 z-30">
+          <button 
+            onClick={() => {
+              setIsModalOpen(true);
+              handleGetLocation();
+            }}
+            className="w-14 h-14 rounded-full bg-secondary dark:bg-safepulse-accent text-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
+          >
+            <span className="material-symbols-outlined text-[28px]">add</span>
+          </button>
+        </div>
+      )}
 
       {/* Glassmorphic Add Geofence Modal */}
       {isModalOpen && (

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -37,6 +38,7 @@ router.post('/register', async (req, res) => {
       // Activate the user's session — they are considered online until they explicitly log out
       user.sessionActive = true;
       user.sessionStartedAt = new Date();
+      user.deviceSession = crypto.randomUUID();
       await user.save();
 
       const io = req.app.get('io');
@@ -51,6 +53,7 @@ router.post('/register', async (req, res) => {
         email: user.email,
         phone: user.phone,
         token: generateToken(user._id),
+        deviceSession: user.deviceSession,
       });
     } else {
       res.status(400).json({ success: false, message: 'Invalid user data' });
@@ -70,14 +73,19 @@ router.post('/login', async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
-      // Activate session on login — user stays online until explicit logout
+      // Generate a new device session — this invalidates any previous session
       user.sessionActive = true;
       user.sessionStartedAt = new Date();
+      user.deviceSession = crypto.randomUUID();
       await user.save();
 
       const io = req.app.get('io');
       if (io) {
+        // Notify about online status change
         io.emit('user_status_change', { userId: user._id.toString(), status: 'Online' });
+
+        // Force-disconnect previous device's sockets so the old session cannot linger
+        io.in(`user_${user._id}`).disconnectSockets(true);
       }
 
       res.json({
@@ -86,6 +94,7 @@ router.post('/login', async (req, res) => {
         name: user.name,
         email: user.email,
         token: generateToken(user._id),
+        deviceSession: user.deviceSession,
       });
     } else {
       res.status(401).json({ success: false, message: 'Invalid email or password' });
@@ -104,6 +113,7 @@ router.post('/logout', protect, async (req, res) => {
     if (user) {
       user.sessionActive = false;
       user.sessionStartedAt = null;
+      user.deviceSession = null;
       await user.save();
 
       const io = req.app.get('io');

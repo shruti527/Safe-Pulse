@@ -17,6 +17,7 @@ const userSchema = new mongoose.Schema({
   fcmToken: { type: String, default: null },
   sessionActive: { type: Boolean, default: false },
   sessionStartedAt: { type: Date, default: null },
+  deviceSession: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

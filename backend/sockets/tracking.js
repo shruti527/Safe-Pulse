@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const TrackingSession = require('../models/TrackingSession');
+const SharingSession = require('../models/SharingSession');
 const User = require('../models/User');
 const SOSAlert = require('../models/SOSAlert');
 
@@ -262,6 +263,25 @@ module.exports = function (io) {
           return;
         }
 
+        // --- Privacy gate: Temporary Sharing Session check ---
+        // Before broadcasting any real-time coordinates to contacts, verify
+        // that the user has an active, unexpired SharingSession.  If no valid
+        // session exists, we suppress the broadcast and notify the sender so
+        // they know their location is not being shared.
+        const activeSharing = await SharingSession.findOne({
+          userId,
+          isActive: true,
+          expiresAt: { $gt: new Date() },
+        });
+        if (!activeSharing) {
+          socket.emit('sharing_gate_blocked', {
+            message: 'Location broadcast suppressed — no active sharing session. Start one from the Share page.',
+            userId,
+          });
+          debugLog(`[SOCKET] locationUpdate blocked for user ${userId} — no active SharingSession`);
+          return;
+        }
+
         // Update tracking session route if session exists
         if (sessionId) {
           await TrackingSession.findByIdAndUpdate(sessionId, {
@@ -279,6 +299,23 @@ module.exports = function (io) {
           battery,
           network,
           timestamp: new Date()
+        });
+
+        // Pipe coordinates to friend tracking subscribers (SafeZones map page)
+        io.to(`tracking_${userId}`).emit('friend_location_update', {
+          userId,
+          latitude,
+          longitude,
+          accuracy,
+          battery,
+          network,
+          timestamp: new Date()
+        });
+
+        // Evaluate location against active geofences (fire-and-forget)
+        const { evaluateLocation } = require('../utils/geofenceEvaluator');
+        evaluateLocation(userId, latitude, longitude, io).catch(err => {
+          console.error('[SOCKET] Error evaluating geofences:', err);
         });
       } catch (err) {
         console.error('[SOCKET] Error in locationUpdate:', err);
@@ -529,6 +566,20 @@ module.exports = function (io) {
       if (!contactId) return;
       socket.leave(`user_${contactId}`);
       debugLog(`[SOCKET] Socket ${socket.id} stopped tracking contact ${contactId}`);
+    });
+
+    // 9. subscribe_to_friend — join a dedicated tracking room for a friend's real-time location
+    socket.on('subscribe_to_friend', (friendId) => {
+      if (!friendId || !isValidObjectId(friendId)) return;
+      socket.join(`tracking_${friendId}`);
+      debugLog(`[SOCKET] Socket ${socket.id} subscribed to friend tracking_${friendId}`);
+    });
+
+    // 10. unsubscribe_from_friend — leave the friend's tracking room
+    socket.on('unsubscribe_from_friend', (friendId) => {
+      if (!friendId) return;
+      socket.leave(`tracking_${friendId}`);
+      debugLog(`[SOCKET] Socket ${socket.id} unsubscribed from friend tracking_${friendId}`);
     });
 
     socket.on('disconnect', () => {

@@ -13,7 +13,7 @@ const Register = () => {
       const res = await axios.post('/api/auth/register', formData);
       if (res.data.success) {
         localStorage.setItem('token', res.data.token);
-        // Backend returns user data in res.data.data
+        localStorage.setItem('deviceSession', res.data.deviceSession);
         localStorage.setItem('userId', res.data.data?._id || res.data._id);
         navigate('/');
       }

@@ -1,14 +1,55 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { getSocket } from '../socket';
+
+const DURATION_MAP = {
+  '15 Minutes': 15,
+  '1 Hour': 60,
+  '4 Hours': 240,
+  'Always': 1440,
+};
 
 const TemporarySharing = () => {
   const navigate = useNavigate();
   const [activeDuration, setActiveDuration] = useState('1 Hour');
-  const [customRange, setCustomRange] = useState(150); // minutes (2h 30m)
+  const [customRange, setCustomRange] = useState(150);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const handleConfirm = () => {
-    alert(`Temporary location sharing active for ${activeDuration === 'Custom' ? formatMinutes(customRange) : activeDuration}!`);
-    navigate('/');
+  // Listen for sharing-gate blocked events emitted when location broadcasts
+  // are suppressed due to an expired or missing sharing session.
+  useEffect(() => {
+    const socket = getSocket();
+    const handleBlocked = (data) => {
+      setError(data.message || 'Location sharing is not active. Start a new session.');
+    };
+    socket.on('sharing_gate_blocked', handleBlocked);
+    return () => socket.off('sharing_gate_blocked', handleBlocked);
+  }, []);
+
+  const getDurationMinutes = () => {
+    if (activeDuration === 'Custom') return customRange;
+    return DURATION_MAP[activeDuration] || 60;
+  };
+
+  const handleConfirm = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const minutes = getDurationMinutes();
+      await axios.post('/api/sharing/start', {
+        durationMinutes: minutes,
+        label: activeDuration,
+      });
+      alert(`Temporary location sharing active for ${activeDuration === 'Custom' ? formatMinutes(customRange) : activeDuration}!`);
+      navigate('/');
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to start sharing session. Please try again.';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const formatMinutes = (mins) => {
@@ -186,14 +227,23 @@ const TemporarySharing = () => {
 
         {/* Action Bar */}
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-stack-md">
+          {error && (
+            <div className="w-full text-center mb-2">
+              <span className="font-label-md text-label-md text-red-500 dark:text-red-400">{error}</span>
+            </div>
+          )}
           <button 
             onClick={handleConfirm}
-            className="w-full sm:w-auto px-10 py-4 bg-gradient-to-r from-secondary to-[#8257e5] text-white rounded-full font-label-md text-label-md inner-glow shadow-lg hover:opacity-90 transition-opacity active:scale-95 duration-200"
+            disabled={loading}
+            className={`w-full sm:w-auto px-10 py-4 bg-gradient-to-r from-secondary to-[#8257e5] text-white rounded-full font-label-md text-label-md inner-glow shadow-lg transition-opacity active:scale-95 duration-200 ${
+              loading ? 'opacity-60 cursor-not-allowed' : 'hover:opacity-90'
+            }`}
           >
-            Confirm Sharing
+            {loading ? 'Starting...' : 'Confirm Sharing'}
           </button>
           <button 
             onClick={() => navigate('/')}
+            disabled={loading}
             className="w-full sm:w-auto px-10 py-4 bg-transparent text-on-surface-variant border border-outline-variant rounded-full font-label-md text-label-md hover:bg-surface-container dark:hover:bg-surface-container-highest transition-colors active:scale-95 duration-200"
           >
             Cancel

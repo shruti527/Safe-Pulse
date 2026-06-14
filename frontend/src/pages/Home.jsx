@@ -23,6 +23,9 @@ const Home = () => {
   const [contactsOnMap, setContactsOnMap] = useState([]);
   const [focusedContact, setFocusedContact] = useState(null);
   const [acceptedContactIds, setAcceptedContactIds] = useState([]);
+  const [trackingMeContacts, setTrackingMeContacts] = useState([]);
+  const [iTrackContactNames, setITrackContactNames] = useState([]);
+  const [showContactsPanel, setShowContactsPanel] = useState(false);
   const [checkInActive, setCheckInActive] = useState(() => {
     const saved = localStorage.getItem('checkInActive');
     return saved !== null ? JSON.parse(saved) : false;
@@ -210,10 +213,54 @@ const Home = () => {
       );
     });
 
+    // New emergency alert from a contact — navigate to the activity feed
+    socket.on('emergencyAlert', (data) => {
+      if (data.userId && data.userId !== userId) {
+        navigate('/alerts');
+      }
+    });
+
+    // Alert escalated — same treatment
+    socket.on('alertEscalated', (data) => {
+      if (data.userId && data.userId !== userId) {
+        navigate('/alerts');
+      }
+    });
+
+    // Contact marked safe — update their status on the map
+    socket.on('userSafe', (data) => {
+      setContactsOnMap((prev) => prev.map((c) =>
+        c.id === data.userId ? { ...c, lastSeen: 'Online' } : c
+      ));
+    });
+
+    // Safe zone entry/exit from a tracked friend
+    socket.on('safeZoneEntry', (data) => {
+      if (data.userId && data.userId !== userId) {
+        navigate('/alerts');
+      }
+    });
+    socket.on('safeZoneExit', (data) => {
+      if (data.userId && data.userId !== userId) {
+        navigate('/alerts');
+      }
+    });
+
+    // Sharing session blocked — show a one-time alert
+    socket.on('sharing_gate_blocked', (data) => {
+      console.warn('[SHARING]', data.message);
+    });
+
     return () => {
       socket.off('session_started');
       socket.off('locationUpdate');
       socket.off('user_status_change');
+      socket.off('emergencyAlert');
+      socket.off('alertEscalated');
+      socket.off('userSafe');
+      socket.off('safeZoneEntry');
+      socket.off('safeZoneExit');
+      socket.off('sharing_gate_blocked');
     };
   }, [userId]);
 
@@ -235,7 +282,7 @@ const Home = () => {
 
   // 1b. Fast low-accuracy position fill (1-3s via WiFi/cell) while GPS acquires
   useEffect(() => {
-    if (currentLocation || !navigator.geolocation) return;
+    if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude, accuracy } = position.coords;
@@ -328,26 +375,46 @@ const Home = () => {
     resolveAddress();
   }, [currentLocation]);
 
-  // 4. Fetch ALL accepted trusted contacts and place them on the map
+  // 4. Fetch trusted contacts with directional awareness
   useEffect(() => {
     const fetchContactsForMap = async () => {
       try {
         const contactsRes = await axios.get('/api/auth/contacts');
         const allContacts = contactsRes.data.data || [];
-        // Show all accepted trusted contacts on the map
-        const accepted = allContacts.filter(c =>
-          c.status === 'accepted'
-        );
+        const currentUserId = localStorage.getItem('userId');
 
-        // Track their IDs for socket room joining
-        const ids = accepted
+        // Separate by direction
+        const iTrack = allContacts.filter(c => {
+          if (c.status !== 'accepted') return false;
+          return c.requestedBy === currentUserId;
+        });
+
+        const trackingMe = allContacts.filter(c => {
+          if (c.status !== 'accepted') return false;
+          return c.requestedBy && c.requestedBy !== currentUserId;
+        });
+
+        setTrackingMeContacts(trackingMe.map(c => ({
+          userId: c.user?._id || c.userId,
+          name: c.user?.name || c.name || 'Contact',
+          online: c.user?.status === 'Online',
+        })));
+
+        setITrackContactNames(iTrack.map(c => ({
+          userId: c.user?._id || c.userId,
+          name: c.user?.name || c.name || 'Contact',
+          online: c.user?.status === 'Online',
+        })));
+
+        // Join socket rooms only for iTrack contacts (whose locations I can see)
+        const ids = iTrack
           .map(c => c.user?._id || c.userId)
           .filter(Boolean);
         setAcceptedContactIds(ids);
 
-        // Fetch last known location for each accepted contact in parallel
+        // Fetch last known location for each iTrack contact
         const mapItems = await Promise.all(
-          accepted.map(async (contact) => {
+          iTrack.map(async (contact) => {
             const contactUserId = contact.user?._id || contact.userId;
             if (!contactUserId) return null;
             const name = contact.user?.name || contact.name || 'Contact';
@@ -363,7 +430,7 @@ const Home = () => {
                 lastSeen: isOnline ? 'Online' : 'Offline',
               };
             } catch {
-              return null; // No location data — skip silently
+              return null;
             }
           })
         );
@@ -427,84 +494,60 @@ const Home = () => {
           </div>
           <span className="material-symbols-outlined text-outline">chevron_right</span>
         </div>
+
+        {/* Trusted Contacts Panel */}
+        {(iTrackContactNames.length > 0 || trackingMeContacts.length > 0) && (
+          <div className="max-w-md w-full mt-2 pointer-events-auto">
+            <button
+              onClick={() => setShowContactsPanel(p => !p)}
+              className="w-full glass-card rounded-lg px-4 py-2 border border-white/40 shadow-sm flex items-center justify-between gap-2 hover:bg-white/80 dark:hover:bg-surface-container-high/80 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px] text-secondary">group</span>
+                <span className="font-label-sm text-label-sm text-on-surface font-semibold">
+                  Trusted Contacts ({iTrackContactNames.length + trackingMeContacts.length})
+                </span>
+              </div>
+              <span className="material-symbols-outlined text-[18px] text-outline transition-transform" style={{ transform: showContactsPanel ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                expand_more
+              </span>
+            </button>
+            {showContactsPanel && (
+              <div className="glass-card rounded-lg mt-1 p-3 border border-white/40 shadow-sm space-y-3">
+                {iTrackContactNames.length > 0 && (
+                  <div>
+                    <p className="font-label-sm text-label-sm text-secondary font-semibold mb-1 flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">visibility</span> You Track
+                    </p>
+                    {iTrackContactNames.map(c => (
+                      <div key={c.userId} className="flex items-center gap-2 py-1">
+                        <span className={`w-2 h-2 rounded-full ${c.online ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                        <span className="font-body-sm text-[13px] text-on-surface">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {trackingMeContacts.length > 0 && (
+                  <div>
+                    <p className="font-label-sm text-label-sm text-amber-600 font-semibold mb-1 flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">visibility_off</span> Tracking You
+                    </p>
+                    {trackingMeContacts.map(c => (
+                      <div key={c.userId} className="flex items-center gap-2 py-1">
+                        <span className={`w-2 h-2 rounded-full ${c.online ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                        <span className="font-body-sm text-[13px] text-on-surface">{c.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Bottom Controls: Card & FABs side by side */}
-      <div className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-0 w-full px-container-margin flex justify-between items-end gap-4 z-30 pointer-events-none">
-        {/* Active Sharing Session Card */}
-        <div className="flex-1 max-w-[260px] glass-card rounded-lg p-stack-md border border-white/40 shadow-lg pointer-events-auto">
-          <div className="flex justify-between items-center mb-stack-sm">
-            <span className="font-label-md text-label-md text-secondary">Live Tracking</span>
-            <div className="flex items-center gap-1">
-              <div className={`w-2 h-2 rounded-full ${trackingActive ? 'bg-error animate-pulse' : 'bg-outline/40'}`}></div>
-              <span className={`font-label-sm text-label-sm ${trackingActive ? 'text-error' : 'text-on-surface-variant'}`}>
-                {trackingActive ? 'Active' : 'Paused'}
-              </span>
-            </div>
-          </div>
-          <p className="font-headline-md text-headline-md font-bold mb-stack-sm">
-            {trackingActive ? trackingDuration || '00:00:00' : '--:--:--'}
-          </p>
-
-          <button 
-            onClick={() => {
-              if (trackingActive) {
-                socketRef.current.emit('end_session', { userId, sessionId });
-                setTrackingActive(false);
-                setSessionId(null);
-                setTrackingStartTime(null);
-              } else {
-                setTrackingActive(true);
-                setTrackingStartTime(Date.now());
-                if (currentLocation) {
-                  socketRef.current.emit('start_session', { 
-                    userId, 
-                    latitude: currentLocation.latitude, 
-                    longitude: currentLocation.longitude 
-                  });
-                }
-              }
-            }}
-            className={`w-full py-stack-md rounded-full font-label-md transition-colors pointer-events-auto mb-2 ${
-              trackingActive ? 'bg-primary text-on-primary hover:opacity-90' : 'bg-secondary text-white hover:opacity-95'
-            }`}
-          >
-            {trackingActive ? 'End Session' : 'Start Session'}
-          </button>
-
-          {checkInActive ? (
-            <div className="mt-2 border-t border-black/10 dark:border-white/10 pt-2 pointer-events-auto">
-              <div className="flex justify-between items-center mb-2">
-                <span className="font-label-sm text-xs text-secondary">Check-In</span>
-                <span className="font-label-sm text-xs font-bold text-error animate-pulse">{checkInTimeLeft}</span>
-              </div>
-              <button 
-                onClick={handleResolveCheckIn}
-                className="w-full py-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors font-label-md"
-              >
-                Check In Safe
-              </button>
-            </div>
-          ) : (
-            <div className="mt-2 border-t border-black/10 dark:border-white/10 pt-2 flex gap-1 pointer-events-auto">
-              <button 
-                onClick={() => handleStartCheckIn(15)}
-                className="flex-1 py-1 text-[10px] bg-secondary/10 text-secondary rounded-lg hover:bg-secondary/20 transition-colors font-label-sm"
-              >
-                +15m
-              </button>
-              <button 
-                onClick={() => handleStartCheckIn(30)}
-                className="flex-1 py-1 text-[10px] bg-secondary/10 text-secondary rounded-lg hover:bg-secondary/20 transition-colors font-label-sm"
-              >
-                +30m
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Floating Action Buttons */}
-        <div className="flex flex-col items-end gap-stack-md pointer-events-auto flex-shrink-0">
+      {/* Floating Action Buttons */}
+      <div className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] right-0 px-container-margin flex flex-col items-end gap-stack-md z-30 pointer-events-auto">
         {/* Recenter FAB */}
         <button
           onClick={() => setRecenterTrigger(t => t + 1)}
@@ -531,7 +574,6 @@ const Home = () => {
           <span className="material-symbols-outlined text-4xl" style={{fontVariationSettings: "'FILL' 1"}}>sos</span>
           <span className="font-label-sm text-label-sm font-extrabold uppercase tracking-widest mt-0.5">SOS</span>
         </button>
-      </div>
       </div>
     </main>
   );

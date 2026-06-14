@@ -9,12 +9,16 @@ import App from './App.jsx'
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 axios.defaults.baseURL = apiUrl.replace(/\/api\/?$/, '');
 
-// Global request interceptor — attach JWT Authorization header to every request
+// Global request interceptor — attach JWT Authorization and device session headers to every request
 axios.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
+    }
+    const deviceSession = localStorage.getItem('deviceSession');
+    if (deviceSession) {
+      config.headers['X-Device-Session'] = deviceSession;
     }
     return config;
   },
@@ -33,6 +37,7 @@ axios.interceptors.response.use(
       if (!publicPaths.includes(currentPath)) {
         console.warn('[AUTH] Token expired or unauthorized. Redirecting to login.');
         localStorage.removeItem('token');
+        localStorage.removeItem('deviceSession');
         localStorage.removeItem('userId');
         delete axios.defaults.headers.common['Authorization'];
         window.location.href = '/login';

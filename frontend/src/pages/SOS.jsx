@@ -30,16 +30,38 @@ const SOS = () => {
     fetchContacts();
   }, []);
 
-  // Socket: listen for when a contact marks us as safe
+  // Socket: listen for emergency confirmation, escalation, and safe resolution
   useEffect(() => {
     const socket = getSocket();
+
     const handleUserSafe = (data) => {
       if (data.userId?.toString() === userId) {
         navigate('/');
       }
     };
+
+    const handleEmergencyAlert = (data) => {
+      // Confirm our own SOS broadcast was received by the server
+      if (data.alertId && data.userId?.toString() === userId) {
+        setAlertId(data.alertId);
+      }
+    };
+
+    const handleEscalated = (data) => {
+      if (data.userId?.toString() === userId) {
+        console.warn(`[SOS] Alert escalated to Level ${data.escalationLevel}`);
+      }
+    };
+
     socket.on('userSafe', handleUserSafe);
-    return () => socket.off('userSafe', handleUserSafe);
+    socket.on('emergencyAlert', handleEmergencyAlert);
+    socket.on('alertEscalated', handleEscalated);
+
+    return () => {
+      socket.off('userSafe', handleUserSafe);
+      socket.off('emergencyAlert', handleEmergencyAlert);
+      socket.off('alertEscalated', handleEscalated);
+    };
   }, [userId, navigate]);
 
   // Track which contacts have been alerted once SOS is active

@@ -22,6 +22,7 @@ const connectDB = require('./config/db');
 const safepulseRoutes = require('./routes/safepulse');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
+const sharingRoutes = require('./routes/sharing');
 
 const app = express();
 const server = http.createServer(app);
@@ -91,6 +92,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/sharing', sharingRoutes);
 app.use('/api', safepulseRoutes);
 
 // 404 handler for undefined routes

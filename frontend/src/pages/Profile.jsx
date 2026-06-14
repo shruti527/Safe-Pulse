@@ -204,6 +204,7 @@ const Profile = () => {
       console.error('Logout request failed:', err);
     }
     localStorage.removeItem('token');
+    localStorage.removeItem('deviceSession');
     localStorage.removeItem('userId');
     delete axios.defaults.headers.common['Authorization'];
     navigate('/login');
