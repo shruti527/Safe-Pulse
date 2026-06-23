@@ -98,7 +98,7 @@ const SkeletonPulse = ({ className }) => (
 );
 
 const ProfileSkeleton = () => (
-  <main className="max-w-xl mx-auto px-4 py-stack-lg flex-grow overflow-y-auto pb-32 pt-20">
+  <main className="max-w-xl mx-auto px-4 py-stack-lg flex-grow overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pb-32 pt-20">
     <section className="flex flex-col items-center mb-8 mt-16">
       <div className="w-24 h-24 rounded-full bg-surface-container animate-pulse" />
       <SkeletonPulse className="mt-4 w-36 h-5" />
@@ -249,7 +249,7 @@ const Profile = () => {
   const acceptedContacts = user.contacts?.filter((c) => c.status === 'accepted').length ?? 0;
 
   return (
-    <main className="max-w-xl mx-auto px-4 py-stack-lg flex-grow overflow-y-auto pb-32 pt-20">
+    <main className="max-w-xl mx-auto px-4 py-stack-lg flex-grow overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pb-32 pt-20">
       {/* ── Profile Header ── */}
       <section className="flex flex-col items-center mb-8 mt-16" aria-label="Profile header">
         <div className="relative group">

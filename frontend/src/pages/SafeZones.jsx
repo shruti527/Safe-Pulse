@@ -326,7 +326,7 @@ const SafeZones = () => {
 
   return (
     <div className="flex-grow flex flex-col h-[calc(100vh-130px)] bg-surface dark:bg-safepulse-dark relative w-full">
-      <div className="px-container-margin pt-4 pb-2">
+      <div className="px-container-margin pt-20 pb-2">
         <h2 className="font-headline-md text-headline-md font-bold text-on-surface mb-1">Safe Zones</h2>
         <p className="font-body-sm text-sm text-on-surface-variant mb-4">
           {viewMode === 'my_zones'
