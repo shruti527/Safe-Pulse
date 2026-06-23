@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 
 // Recenter helper component: MapContainer center is immutable after mount, 
@@ -30,6 +30,15 @@ const FlyToContact = ({ focusedContact }) => {
       map.flyTo(focusedContact.position, 15, { animate: true, duration: 1.0 });
     }
   }, [focusedContact, map]);
+  return null;
+};
+
+const MapClickHandler = ({ onMapClick }) => {
+  useMapEvents({
+    click: (e) => {
+      if (onMapClick) onMapClick(e.latlng);
+    }
+  });
   return null;
 };
 
@@ -68,7 +77,7 @@ const contactIcon = (name, isOnline = true) => L.divIcon({
   iconAnchor: [0, 0]
 });
 
-const MapComponent = ({ center, contacts = [], geofences = [], trackingActive = true, recenterTrigger, focusedContact }) => {
+const MapComponent = ({ center, contacts = [], geofences = [], trackingActive = true, recenterTrigger, focusedContact, onMapClick, previewZone }) => {
   const defaultCenter = center || [37.7749, -122.4194]; // SF fallback
   const zoom = 15;
 
@@ -144,6 +153,24 @@ const MapComponent = ({ center, contacts = [], geofences = [], trackingActive = 
           }
           return null;
         })}
+
+        {/* Preview Zone Overlay */}
+        {previewZone && previewZone.latitude && previewZone.longitude && (
+          <Circle
+            center={[previewZone.latitude, previewZone.longitude]}
+            radius={previewZone.radius || 200}
+            pathOptions={{
+              fillColor: '#ef4444',
+              fillOpacity: 0.25,
+              color: '#ef4444',
+              weight: 2,
+              dashArray: '8, 8'
+            }}
+          />
+        )}
+
+        {/* Map Click Handler */}
+        {onMapClick && <MapClickHandler onMapClick={onMapClick} />}
 
         {/* Auto Recenter Map */}
         <RecenterMap center={center} trackingActive={trackingActive} recenterTrigger={recenterTrigger} />

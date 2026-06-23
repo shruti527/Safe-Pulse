@@ -58,8 +58,9 @@ const SafeZones = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Modal states
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // Create flow states
+  const [isCreating, setIsCreating] = useState(false);
+  const [createStep, setCreateStep] = useState('location'); // 'location', 'radius', 'details'
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [radius, setRadius] = useState(200);
@@ -89,8 +90,10 @@ const SafeZones = () => {
     socketRef.current = getSocket();
   }, []);
 
-  // Modal state reset
-  const resetModalForm = () => {
+  // Create state reset
+  const resetCreateForm = () => {
+    setIsCreating(false);
+    setCreateStep('location');
     setName('');
     setAddress('');
     setRadius(200);
@@ -238,10 +241,12 @@ const SafeZones = () => {
       (position) => {
         setLatitude(position.coords.latitude.toString());
         setLongitude(position.coords.longitude.toString());
+        setRecenterTrigger((t) => t + 1);
         setGettingLocation(false);
       },
       (error) => {
         console.error('Error getting location:', error);
+        alert(`Could not get location: ${error.message}. If you are testing in DevTools, please ensure a location is selected in the Sensors tab and not set to 'Location unavailable'.`);
         setGettingLocation(false);
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -268,8 +273,7 @@ const SafeZones = () => {
       const result = res.data;
       if (result.success) {
         setZones((prev) => [...prev, result.data]);
-        resetModalForm();
-        setIsModalOpen(false);
+        resetCreateForm();
       } else {
         alert(result.message || 'Failed to create safe zone.');
       }
@@ -419,7 +423,95 @@ const SafeZones = () => {
 
       {/* Content area */}
       <div className="flex-grow relative">
-        {viewMode === 'my_zones' ? (
+        {isCreating ? (
+          <div className="absolute inset-0">
+            {/* Interactive Map for Creation */}
+            <MapComponent
+              center={latitude && longitude ? [Number(latitude), Number(longitude)] : null}
+              contacts={[]}
+              geofences={[]}
+              trackingActive={false}
+              recenterTrigger={recenterTrigger}
+              onMapClick={(latlng) => {
+                if (createStep === 'location') {
+                  setLatitude(latlng.lat);
+                  setLongitude(latlng.lng);
+                }
+              }}
+              previewZone={latitude && longitude ? { latitude: Number(latitude), longitude: Number(longitude), radius: Number(radius) } : null}
+            />
+
+            {/* Step 1: Location */}
+            {createStep === 'location' && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm z-[400] bg-surface dark:bg-surface-container-high rounded-xl p-4 shadow-xl border border-surface-container-highest dark:border-white/10">
+                <p className="font-label-md text-on-surface text-center mb-3">Tap on the map to set zone location.</p>
+                <div className="flex gap-2">
+                  <button onClick={resetCreateForm} className="flex-1 py-2 font-label-sm text-on-surface bg-surface-container rounded-lg">Cancel</button>
+                  <button 
+                    onClick={() => setCreateStep('radius')}
+                    disabled={!latitude || !longitude}
+                    className="flex-1 py-2 font-label-sm text-white bg-secondary rounded-lg disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Radius */}
+            {createStep === 'radius' && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm z-[400] bg-surface dark:bg-surface-container-high rounded-xl p-4 shadow-xl border border-surface-container-highest dark:border-white/10">
+                <p className="font-label-md text-on-surface text-center mb-2">Adjust Zone Radius: <span className="font-bold text-secondary">{radius}m</span></p>
+                <input 
+                  className="w-full accent-secondary mb-4" 
+                  type="range" min="50" max="1000" step="50" 
+                  value={radius} onChange={(e) => setRadius(Number(e.target.value))}
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => setCreateStep('location')} className="flex-1 py-2 font-label-sm text-on-surface bg-surface-container rounded-lg">Back</button>
+                  <button onClick={() => setCreateStep('details')} className="flex-1 py-2 font-label-sm text-white bg-secondary rounded-lg">Next</button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Details */}
+            {createStep === 'details' && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm z-[400] bg-surface dark:bg-surface-container-high rounded-xl p-4 shadow-xl border border-surface-container-highest dark:border-white/10">
+                <p className="font-label-md text-on-surface mb-3">Zone Details</p>
+                <input 
+                  className="w-full h-11 px-3 mb-3 bg-surface-container-lowest dark:bg-surface-container border border-outline/20 rounded-lg text-sm text-on-surface" 
+                  placeholder="Zone Name (e.g. Home)" 
+                  value={name} onChange={(e) => setName(e.target.value)}
+                />
+                <input 
+                  className="w-full h-11 px-3 mb-4 bg-surface-container-lowest dark:bg-surface-container border border-outline/20 rounded-lg text-sm text-on-surface" 
+                  placeholder="Address (Optional)" 
+                  value={address} onChange={(e) => setAddress(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button onClick={() => setCreateStep('radius')} className="flex-1 py-2 font-label-sm text-on-surface bg-surface-container rounded-lg">Back</button>
+                  <button 
+                    onClick={handleCreateZone}
+                    disabled={!name.trim() || submitting}
+                    className="flex-1 py-2 font-label-sm text-white bg-secondary rounded-lg flex items-center justify-center disabled:opacity-50"
+                  >
+                    {submitting ? 'Saving...' : 'Save Zone'}
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* Auto-location button overlay when creating */}
+            <button
+              onClick={handleGetLocation}
+              disabled={gettingLocation}
+              className="absolute top-4 right-4 z-[400] w-12 h-12 flex items-center justify-center bg-white/80 dark:bg-surface-container-high/90 backdrop-blur-md text-primary rounded-full shadow-md disabled:opacity-50"
+              title="My Location"
+            >
+              <span className="material-symbols-outlined" style={{fontVariationSettings: "'FILL' 1"}}>my_location</span>
+            </button>
+          </div>
+        ) : viewMode === 'my_zones' ? (
           <div className="absolute inset-0 overflow-y-auto px-container-margin pb-24">
             {loading ? (
               <div className="flex flex-col items-center justify-center h-full text-center pb-12">
@@ -492,139 +584,19 @@ const SafeZones = () => {
         )}
       </div>
 
-      {/* Floating Add Button — only show in my_zones mode */}
-      {viewMode === 'my_zones' && (
+      {/* Floating Add Button — only show in my_zones mode and not creating */}
+      {viewMode === 'my_zones' && !isCreating && (
         <div className="absolute bottom-24 right-6 z-30">
           <button 
             onClick={() => {
-              setIsModalOpen(true);
-              handleGetLocation();
+              setIsCreating(true);
+              setCreateStep('location');
+              handleGetLocation(); // Attempt to center on user location initially
             }}
             className="w-14 h-14 rounded-full bg-secondary dark:bg-safepulse-accent text-white shadow-lg flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
           >
             <span className="material-symbols-outlined text-[28px]">add</span>
           </button>
-        </div>
-      )}
-
-      {/* Glassmorphic Add Geofence Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-surface-container-high rounded-2xl w-full max-w-md p-6 border border-surface-container-highest dark:border-white/10 shadow-2xl relative space-y-4 animate-[fadeIn_0.3s_ease-out]">
-            <div className="flex justify-between items-center pb-2 border-b border-outline/10">
-              <h3 className="font-headline-sm text-xl font-bold text-on-surface">Add New Safe Zone</h3>
-              <button 
-                onClick={() => setIsModalOpen(false)}
-                className="text-on-surface-variant hover:text-on-surface p-1 rounded-full hover:bg-surface-container-highest/50 transition-all flex items-center justify-center"
-              >
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateZone} className="space-y-4">
-              <div className="space-y-1">
-                <label className="font-label-sm text-xs text-on-surface-variant block" htmlFor="zoneName">Zone Name *</label>
-                <input 
-                  className="w-full h-11 px-3 bg-surface-container-lowest dark:bg-surface-container/40 border border-outline/20 rounded-lg font-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/20 transition-all" 
-                  id="zoneName" 
-                  placeholder="e.g. Home, Office, Gym" 
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-label-sm text-xs text-on-surface-variant block" htmlFor="zoneAddress">Address (Optional)</label>
-                <input 
-                  className="w-full h-11 px-3 bg-surface-container-lowest dark:bg-surface-container/40 border border-outline/20 rounded-lg font-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/20 transition-all" 
-                  id="zoneAddress" 
-                  placeholder="e.g. 123 Main St, New York" 
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between items-center">
-                  <label className="font-label-sm text-xs text-on-surface-variant" htmlFor="zoneRadius">Radius: <span className="font-bold text-secondary">{radius}m</span></label>
-                </div>
-                <input 
-                  className="w-full accent-secondary" 
-                  id="zoneRadius" 
-                  type="range"
-                  min="50"
-                  max="1000"
-                  step="50"
-                  value={radius}
-                  onChange={(e) => setRadius(Number(e.target.value))}
-                />
-                <div className="flex justify-between text-[10px] text-outline">
-                  <span>50m</span>
-                  <span>500m</span>
-                  <span>1000m</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-label-sm text-xs text-on-surface-variant block" htmlFor="lat">Latitude *</label>
-                  <input 
-                    className="w-full h-11 px-3 bg-surface-container-lowest dark:bg-surface-container/40 border border-outline/20 rounded-lg font-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/20 transition-all" 
-                    id="lat" 
-                    placeholder="e.g. 37.7749" 
-                    type="number"
-                    step="any"
-                    required
-                    value={latitude}
-                    onChange={(e) => setLatitude(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-label-sm text-xs text-on-surface-variant block" htmlFor="lng">Longitude *</label>
-                  <input 
-                    className="w-full h-11 px-3 bg-surface-container-lowest dark:bg-surface-container/40 border border-outline/20 rounded-lg font-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-secondary/20 transition-all" 
-                    id="lng" 
-                    placeholder="e.g. -122.4194" 
-                    type="number"
-                    step="any"
-                    required
-                    value={longitude}
-                    onChange={(e) => setLongitude(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleGetLocation}
-                disabled={gettingLocation}
-                className="w-full h-10 border border-secondary text-secondary rounded-lg font-label-md flex items-center justify-center gap-2 hover:bg-secondary/5 transition-colors disabled:opacity-55"
-              >
-                <span className="material-symbols-outlined text-[18px]">my_location</span>
-                <span>{gettingLocation ? 'Locating...' : 'Detect Current Location'}</span>
-              </button>
-
-              <div className="pt-2 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="flex-1 h-12 bg-surface-container-highest text-on-surface rounded-lg font-label-md hover:bg-opacity-90 transition-opacity"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 h-12 bg-secondary text-white rounded-lg font-label-md hover:opacity-90 transition-opacity flex items-center justify-center disabled:opacity-50"
-                >
-                  {submitting ? 'Adding...' : 'Create Zone'}
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
     </div>
